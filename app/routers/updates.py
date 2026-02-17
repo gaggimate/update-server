@@ -176,15 +176,6 @@ async def upload_release_target(
                 detail=f"Missing upload for part {part['filename']}",
             )
 
-    target_directory = release_dir(channel, version) / target
-    target_directory.mkdir(parents=True, exist_ok=True)
-
-    for file in files:
-        filename = validate_filename(file.filename or "")
-        destination = target_directory / filename
-        content = await file.read()
-        destination.write_bytes(content)
-
     try:
         release = load_release(channel, version)
     except HTTPException:
@@ -194,6 +185,21 @@ async def upload_release_target(
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "targets": {},
         }
+
+    if target in release.get("targets", {}):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Release {channel}/{version}/{target} already exists and cannot be overwritten",
+        )
+
+    target_directory = release_dir(channel, version) / target
+    target_directory.mkdir(parents=True, exist_ok=True)
+
+    for file in files:
+        filename = validate_filename(file.filename or "")
+        destination = target_directory / filename
+        content = await file.read()
+        destination.write_bytes(content)
 
     release.setdefault("targets", {})[target] = {
         "target": target,
