@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Firmware Flasher</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 2rem;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 12px;
+      padding: 1.5rem;
+    }
+    h1 { margin-top: 0; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 1.25rem;
+    }
+    select, button {
+      background: #0b1220;
+      color: #e2e8f0;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 0.45rem 0.7rem;
+      font-size: 0.95rem;
+    }
+    button {
+      cursor: pointer;
+      background: #1d4ed8;
+      border-color: #2563eb;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+    }
+    .card {
+      border: 1px solid #374151;
+      border-radius: 10px;
+      padding: 1rem;
+      background: #0b1220;
+    }
+    .card h2 {
+      margin-top: 0;
+      font-size: 1.05rem;
+    }
+    .hint {
+      color: #94a3b8;
+      font-size: 0.9rem;
+      margin-top: 0;
+    }
+    code {
+      font-size: 0.75rem;
+      word-break: break-all;
+      color: #93c5fd;
+      display: block;
+      margin: 0.65rem 0;
+    }
+  </style>
+  <script type="module" src="https://unpkg.com/esp-web-tools@9.4.3/dist/web/install-button.js?module"></script>
+</head>
+<body>
+  <main>
+    <h1>Device Firmware Flasher</h1>
+    <p class="hint">Choose a release channel and flash the latest firmware for your target device.</p>
+
+    <form class="toolbar" method="get" action="/">
+      <label for="channel">Channel</label>
+      <select id="channel" name="channel">
+        {% for channel in channels %}
+          <option value="{{ channel }}" {% if channel == selected_channel %}selected{% endif %}>{{ channel }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Load channel</button>
+      {% if latest_release %}
+        <span class="hint">Latest release: <strong>{{ latest_release }}</strong></span>
+      {% else %}
+        <span class="hint">No releases uploaded yet for this channel.</span>
+      {% endif %}
+    </form>
+
+    <section class="grid">
+      {% for target in targets %}
+        <article class="card">
+          <h2>{{ target.label }}</h2>
+          {% if latest_release %}
+            <esp-web-install-button manifest="{{ target.manifest_url }}"></esp-web-install-button>
+            <code>{{ target.manifest_url }}</code>
+          {% else %}
+            <p class="hint">No firmware available for this channel yet.</p>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </section>
+  </main>
+</body>
+</html>

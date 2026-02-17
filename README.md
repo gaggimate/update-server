@@ -10,14 +10,15 @@ It supports:
 
 ## API overview
 
-- `GET /` health endpoint
-- `GET /channels` list available channels
-- `GET /releases/{channel}` list uploaded release versions
-- `GET /check/{channel}` compare currently running versions with latest uploaded target versions
-- `POST /admin/releases/upload` upload firmware artifacts for a target
-- `GET /updates/{channel}/{version}/{target}/manifest` fetch manifest for a specific release
-- `GET /updates/{channel}/latest/{target}/manifest` fetch manifest for latest release of a target
-- `GET /updates/{channel}/{version}/{target}/{filename}` download firmware binary
+- `GET /` templated firmware flashing page
+- `GET /api` API health endpoint
+- `GET /api/channels` list available channels
+- `GET /api/channels/{channel}/releases` list uploaded release versions
+- `GET /api/channels/{channel}/check` compare currently running versions with latest uploaded target versions
+- `POST /api/admin/releases/upload` upload firmware artifacts for a target
+- `GET /api/channels/{channel}/releases/{version}/{target}/manifest` fetch manifest for a specific release
+- `GET /api/channels/{channel}/releases/latest/{target}/manifest` fetch manifest for latest release of a target
+- `GET /api/channels/{channel}/releases/{version}/{target}/{filename}` download firmware binary
 
 ## Configuration
 
@@ -67,7 +68,7 @@ docker compose -f docker-compose.test.yml down -v --remove-orphans
 You can upload with plain `curl`:
 
 ```bash
-curl -X POST http://localhost:8000/admin/releases/upload \
+curl -X POST http://localhost:8000/api/admin/releases/upload \
   -H "x-api-key: ${ADMIN_API_KEY}" \
   -F channel=stable \
   -F version=1.2.3 \
