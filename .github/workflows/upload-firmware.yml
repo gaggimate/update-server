@@ -1,0 +1,183 @@
+name: Upload firmware release
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - nightly
+      version:
+        description: Release version (e.g. 1.2.3)
+        required: true
+        type: string
+      target:
+        description: Firmware target
+        required: true
+        default: controller
+        type: choice
+        options:
+          - controller
+          - display
+          - headless
+      firmware_dir:
+        description: Directory containing firmware files
+        required: true
+        default: firmware
+        type: string
+      firmware_files:
+        description: Comma-separated filenames relative to firmware_dir
+        required: true
+        default: bootloader.bin,partitions.bin,boot_app0.bin,firmware.bin
+        type: string
+      component_version:
+        description: Optional manifest componentVersion override
+        required: false
+        type: string
+      chip_family:
+        description: Optional manifest chipFamily override
+        required: false
+        type: string
+      label:
+        description: Optional manifest label override
+        required: false
+        type: string
+      parts_json_file:
+        description: Optional JSON file path for explicit parts mapping
+        required: false
+        type: string
+      offsets_json_file:
+        description: Optional JSON file path for filename->offset mapping
+        required: false
+        type: string
+
+  workflow_call:
+    inputs:
+      channel:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      target:
+        required: true
+        type: string
+      firmware_dir:
+        required: false
+        default: firmware
+        type: string
+      firmware_files:
+        required: false
+        default: bootloader.bin,partitions.bin,boot_app0.bin,firmware.bin
+        type: string
+      component_version:
+        required: false
+        type: string
+      chip_family:
+        required: false
+        type: string
+      label:
+        required: false
+        type: string
+      parts_json_file:
+        required: false
+        type: string
+      offsets_json_file:
+        required: false
+        type: string
+    secrets:
+      UPDATE_SERVER_URL:
+        required: true
+      UPDATE_SERVER_API_KEY:
+        required: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
+      UPDATE_SERVER_API_KEY: ${{ secrets.UPDATE_SERVER_API_KEY }}
+
+    steps:
+      - name: Checkout firmware repository
+        uses: actions/checkout@v4
+
+      - name: Validate required configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${UPDATE_SERVER_URL}" ]]; then
+            echo "Missing UPDATE_SERVER_URL secret" >&2
+            exit 1
+          fi
+
+      - name: Upload firmware release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${{ inputs.parts_json_file }}" && -n "${{ inputs.offsets_json_file }}" ]]; then
+            echo "Use either parts_json_file or offsets_json_file, not both" >&2
+            exit 1
+          fi
+
+          FORM_ARGS=(
+            -F "channel=${{ inputs.channel }}"
+            -F "version=${{ inputs.version }}"
+            -F "target=${{ inputs.target }}"
+          )
+
+          if [[ -n "${{ inputs.component_version }}" ]]; then
+            FORM_ARGS+=( -F "component_version=${{ inputs.component_version }}" )
+          fi
+          if [[ -n "${{ inputs.chip_family }}" ]]; then
+            FORM_ARGS+=( -F "chip_family=${{ inputs.chip_family }}" )
+          fi
+          if [[ -n "${{ inputs.label }}" ]]; then
+            FORM_ARGS+=( -F "label=${{ inputs.label }}" )
+          fi
+
+          if [[ -n "${{ inputs.parts_json_file }}" ]]; then
+            test -f "${{ inputs.parts_json_file }}" || {
+              echo "Missing parts_json_file: ${{ inputs.parts_json_file }}" >&2
+              exit 1
+            }
+            FORM_ARGS+=( -F "parts_json=$(cat "${{ inputs.parts_json_file }}")" )
+          fi
+
+          if [[ -n "${{ inputs.offsets_json_file }}" ]]; then
+            test -f "${{ inputs.offsets_json_file }}" || {
+              echo "Missing offsets_json_file: ${{ inputs.offsets_json_file }}" >&2
+              exit 1
+            }
+            FORM_ARGS+=( -F "offsets_json=$(cat "${{ inputs.offsets_json_file }}")" )
+          fi
+
+          IFS=',' read -r -a FILENAMES <<< "${{ inputs.firmware_files }}"
+          for filename in "${FILENAMES[@]}"; do
+            filename_trimmed="$(echo "$filename" | xargs)"
+            file_path="${{ inputs.firmware_dir }}/${filename_trimmed}"
+            if [[ ! -f "$file_path" ]]; then
+              echo "Missing firmware file: $file_path" >&2
+              exit 1
+            fi
+            FORM_ARGS+=( -F "files=@${file_path}" )
+          done
+
+          HEADER_ARGS=()
+          if [[ -n "${UPDATE_SERVER_API_KEY}" ]]; then
+            HEADER_ARGS+=( -H "x-api-key: ${UPDATE_SERVER_API_KEY}" )
+          fi
+
+          UPLOAD_URL="${UPDATE_SERVER_URL%/}/admin/releases/upload"
+          echo "Uploading ${{ inputs.target }} firmware for version ${{ inputs.version }} to ${UPLOAD_URL}"
+
+          curl --fail-with-body --show-error --silent \
+            -X POST "${UPLOAD_URL}" \
+            "${HEADER_ARGS[@]}" \
+            "${FORM_ARGS[@]}"
+          echo
