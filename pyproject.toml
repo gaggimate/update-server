@@ -1,0 +1,15 @@
+[project]
+name = "update-server"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Jochen Ullrich",email = "kontakt@ju-hh.de"}
+]
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi[standard] (>=0.129.0,<0.130.0)"
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
