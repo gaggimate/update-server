@@ -25,7 +25,9 @@ It supports:
 Environment variables:
 
 - `UPDATE_STORAGE_DIR` (default: `storage`): where releases are stored
-- `ADMIN_API_KEY` (optional): when set, upload endpoint requires header `x-api-key`
+- `ADMIN_API_KEY`: upload endpoint auth key; required unless `ALLOW_UNAUTHENTICATED_UPLOADS=true`
+- `ALLOW_UNAUTHENTICATED_UPLOADS` (default: `false`): development-only bypass for upload auth
+- `MAX_UPLOAD_FILE_SIZE_BYTES` (default: `33554432`): per-file upload size limit
 
 ## Local development
 

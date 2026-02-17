@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile, status
@@ -11,16 +13,18 @@ from update_server.config import (
     ALLOWED_CHANNELS,
     DEFAULT_CHIP_FAMILY,
     DEFAULT_PART_OFFSETS,
+    MAX_UPLOAD_FILE_SIZE_BYTES,
     TARGET_LABELS,
 )
 from update_server.security import require_admin_auth_or_404, validate_filename
 from update_server.storage import list_release_versions, load_release, parse_version, release_dir, save_release
-from update_server.validation import require_valid_channel, require_valid_target
+from update_server.validation import require_valid_channel, require_valid_target, require_valid_version
 
 router = APIRouter()
 
 
 def manifest_for_target(channel: str, version: str, target_data: dict[str, Any]) -> dict[str, Any]:
+    artifacts = {item["filename"]: item for item in target_data.get("artifacts", [])}
     return {
         "name": target_data.get("label") or TARGET_LABELS.get(target_data["target"], target_data["target"]),
         "version": target_data.get("componentVersion") or version,
@@ -32,6 +36,8 @@ def manifest_for_target(channel: str, version: str, target_data: dict[str, Any])
                     {
                         "path": f"/api/channels/{channel}/releases/{version}/{target_data['target']}/{part['filename']}",
                         "offset": part["offset"],
+                        "sha256": artifacts.get(part["filename"], {}).get("sha256"),
+                        "size": artifacts.get(part["filename"], {}).get("size"),
                     }
                     for part in target_data["parts"]
                 ],
@@ -113,6 +119,7 @@ async def upload_release_target(
     x_api_key: str | None = Header(None),
 ) -> dict[str, Any]:
     require_valid_channel(channel)
+    require_valid_version(version)
     require_valid_target(target)
     require_admin_auth_or_404(x_api_key)
 
@@ -175,6 +182,8 @@ async def upload_release_target(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Missing upload for part {part['filename']}",
             )
+        if part["offset"] < 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Offsets must be non-negative")
 
     try:
         release = load_release(channel, version)
@@ -195,11 +204,34 @@ async def upload_release_target(
     target_directory = release_dir(channel, version) / target
     target_directory.mkdir(parents=True, exist_ok=True)
 
+    artifacts: dict[str, dict[str, Any]] = {}
     for file in files:
         filename = validate_filename(file.filename or "")
         destination = target_directory / filename
-        content = await file.read()
-        destination.write_bytes(content)
+
+        digest = hashlib.sha256()
+        bytes_written = 0
+        with Path(destination).open("wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                bytes_written += len(chunk)
+                if bytes_written > MAX_UPLOAD_FILE_SIZE_BYTES:
+                    out.close()
+                    destination.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"File {filename} exceeds max upload size of {MAX_UPLOAD_FILE_SIZE_BYTES} bytes",
+                    )
+                out.write(chunk)
+                digest.update(chunk)
+
+        artifacts[filename] = {
+            "filename": filename,
+            "size": bytes_written,
+            "sha256": digest.hexdigest(),
+        }
 
     release.setdefault("targets", {})[target] = {
         "target": target,
@@ -207,6 +239,7 @@ async def upload_release_target(
         "chipFamily": chip_family,
         "componentVersion": component_version or version,
         "parts": parts,
+        "artifacts": [artifacts[part["filename"]] for part in parts],
         "updatedAt": datetime.now(timezone.utc).isoformat(),
     }
     save_release(channel, version, release)
@@ -223,6 +256,7 @@ async def upload_release_target(
 @router.get("/channels/{channel}/releases/{version}/{target}/manifest")
 def manifest(channel: str, version: str, target: str) -> dict[str, Any]:
     require_valid_channel(channel)
+    require_valid_version(version)
     require_valid_target(target)
 
     release = load_release(channel, version)
@@ -250,6 +284,7 @@ def latest_manifest(channel: str, target: str) -> dict[str, Any]:
 @router.get("/channels/{channel}/releases/{version}/{target}/{filename}")
 def binary(channel: str, version: str, target: str, filename: str) -> FileResponse:
     require_valid_channel(channel)
+    require_valid_version(version)
     require_valid_target(target)
     safe_filename = validate_filename(filename)
 
