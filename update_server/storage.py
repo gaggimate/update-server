@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import HTTPException, status
 from packaging.version import InvalidVersion, Version
 
-from app.config import UPDATE_STORAGE_DIR
+from update_server.config import UPDATE_STORAGE_DIR
 
 
 GIT_DESCRIBE_VERSION_RE = re.compile(

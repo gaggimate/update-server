@@ -8,10 +8,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-import app.config as app_config
-import app.security as app_security
-import app.storage as app_storage
-from app.main import app
+import update_server.config as app_config
+import update_server.security as app_security
+import update_server.storage as app_storage
+from update_server.main import app
 
 
 class UpdateServerTests(unittest.TestCase):
@@ -41,19 +41,19 @@ class UpdateServerTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
 
-        response = self.client.get("/check/stable", params={"controller_version": "0.9.0"})
+        response = self.client.get("/channels/stable/check", params={"controller_version": "0.9.0"})
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
         self.assertTrue(payload["updates"]["controller"]["updateAvailable"])
         self.assertEqual(payload["updates"]["controller"]["latest"], "1.0.0")
 
-        response = self.client.get("/updates/stable/1.0.0/controller/manifest")
+        response = self.client.get("/channels/stable/releases/1.0.0/controller/manifest")
         self.assertEqual(response.status_code, 200, response.text)
         manifest = response.json()
         self.assertEqual(manifest["version"], "1.0.0")
-        self.assertEqual(manifest["builds"][0]["parts"][3]["path"], "/updates/stable/1.0.0/controller/firmware.bin")
+        self.assertEqual(manifest["builds"][0]["parts"][3]["path"], "/channels/stable/releases/1.0.0/controller/firmware.bin")
 
-        response = self.client.get("/updates/stable/1.0.0/controller/firmware.bin")
+        response = self.client.get("/channels/stable/releases/1.0.0/controller/firmware.bin")
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.content, b"firm")
 
@@ -92,7 +92,7 @@ class UpdateServerTests(unittest.TestCase):
         self.assertIn("cannot be overwritten", second.json()["detail"])
 
     def test_download_rejects_invalid_filename(self) -> None:
-        response = self.client.get("/updates/stable/1.0.0/controller/../evil.bin")
+        response = self.client.get("/channels/stable/releases/1.0.0/controller/../evil.bin")
         self.assertIn(response.status_code, [400, 404])
 
     def test_upload_supports_version_specific_offsets_and_variable_parts(self) -> None:
@@ -116,14 +116,14 @@ class UpdateServerTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
 
-        response = self.client.get("/updates/stable/2.0.0/controller/manifest")
+        response = self.client.get("/channels/stable/releases/2.0.0/controller/manifest")
         self.assertEqual(response.status_code, 200, response.text)
         parts = response.json()["builds"][0]["parts"]
         self.assertEqual(
             parts,
             [
-                {"path": "/updates/stable/2.0.0/controller/bootloader_v2.bin", "offset": 4096},
-                {"path": "/updates/stable/2.0.0/controller/factory_v2.bin", "offset": 131072},
+                {"path": "/channels/stable/releases/2.0.0/controller/bootloader_v2.bin", "offset": 4096},
+                {"path": "/channels/stable/releases/2.0.0/controller/factory_v2.bin", "offset": 131072},
             ],
         )
 
@@ -136,7 +136,7 @@ class UpdateServerTests(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 200, response.text)
 
-        response = self.client.get("/releases/stable")
+        response = self.client.get("/channels/stable/releases")
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(
             response.json()["versions"],
@@ -151,11 +151,11 @@ class UpdateServerTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
 
-        up_to_date = self.client.get("/check/stable", params={"controller_version": "v1.7.3-16-g011559ea"})
+        up_to_date = self.client.get("/channels/stable/check", params={"controller_version": "v1.7.3-16-g011559ea"})
         self.assertEqual(up_to_date.status_code, 200, up_to_date.text)
         self.assertFalse(up_to_date.json()["updates"]["controller"]["updateAvailable"])
 
-        behind_tag = self.client.get("/check/stable", params={"controller_version": "v1.7.3"})
+        behind_tag = self.client.get("/channels/stable/check", params={"controller_version": "v1.7.3"})
         self.assertEqual(behind_tag.status_code, 200, behind_tag.text)
         self.assertTrue(behind_tag.json()["updates"]["controller"]["updateAvailable"])
 

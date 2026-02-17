@@ -4,7 +4,7 @@ import re
 
 from fastapi import HTTPException, status
 
-from app.config import ADMIN_API_KEY
+from update_server.config import ADMIN_API_KEY
 
 SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 

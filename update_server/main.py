@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.routers.updates import router as updates_router
+from update_server.routers.updates import router as updates_router
 
 app = FastAPI(title="Update Server")
 app.include_router(updates_router)

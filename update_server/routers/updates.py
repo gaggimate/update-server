@@ -7,15 +7,15 @@ from typing import Any
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 
-from app.config import (
+from update_server.config import (
     ALLOWED_CHANNELS,
     DEFAULT_CHIP_FAMILY,
     DEFAULT_PART_OFFSETS,
     TARGET_LABELS,
 )
-from app.security import require_admin_auth_or_404, validate_filename
-from app.storage import list_release_versions, load_release, parse_version, release_dir, save_release
-from app.validation import require_valid_channel, require_valid_target
+from update_server.security import require_admin_auth_or_404, validate_filename
+from update_server.storage import list_release_versions, load_release, parse_version, release_dir, save_release
+from update_server.validation import require_valid_channel, require_valid_target
 
 router = APIRouter()
 
@@ -30,7 +30,7 @@ def manifest_for_target(channel: str, version: str, target_data: dict[str, Any])
                 "chipFamily": target_data.get("chipFamily", DEFAULT_CHIP_FAMILY),
                 "parts": [
                     {
-                        "path": f"/updates/{channel}/{version}/{target_data['target']}/{part['filename']}",
+                        "path": f"/channels/{channel}/releases/{version}/{target_data['target']}/{part['filename']}",
                         "offset": part["offset"],
                     }
                     for part in target_data["parts"]
@@ -45,13 +45,13 @@ def channels() -> list[str]:
     return ALLOWED_CHANNELS
 
 
-@router.get("/releases/{channel}")
+@router.get("/channels/{channel}/releases")
 def releases(channel: str) -> dict[str, Any]:
     require_valid_channel(channel)
     return {"channel": channel, "versions": list_release_versions(channel)}
 
 
-@router.get("/check/{channel}")
+@router.get("/channels/{channel}/check")
 def check(channel: str, controller_version: str | None = None, display_version: str | None = None) -> dict[str, Any]:
     require_valid_channel(channel)
 
@@ -70,7 +70,7 @@ def check(channel: str, controller_version: str | None = None, display_version: 
             latest_for_target[target] = {
                 "releaseVersion": version,
                 "targetVersion": target_version,
-                "manifestUrl": f"/updates/{channel}/{version}/{target}/manifest",
+                "manifestUrl": f"/channels/{channel}/releases/{version}/{target}/manifest",
             }
 
     updates: dict[str, Any] = {}
@@ -216,11 +216,11 @@ async def upload_release_target(
         "channel": channel,
         "version": version,
         "target": target,
-        "manifestUrl": f"/updates/{channel}/{version}/{target}/manifest",
+        "manifestUrl": f"/channels/{channel}/releases/{version}/{target}/manifest",
     }
 
 
-@router.get("/updates/{channel}/{version}/{target}/manifest")
+@router.get("/channels/{channel}/releases/{version}/{target}/manifest")
 def manifest(channel: str, version: str, target: str) -> dict[str, Any]:
     require_valid_channel(channel)
     require_valid_target(target)
@@ -233,7 +233,7 @@ def manifest(channel: str, version: str, target: str) -> dict[str, Any]:
     return manifest_for_target(channel, version, target_data)
 
 
-@router.get("/updates/{channel}/latest/{target}/manifest")
+@router.get("/channels/{channel}/releases/latest/{target}/manifest")
 def latest_manifest(channel: str, target: str) -> dict[str, Any]:
     require_valid_channel(channel)
     require_valid_target(target)
@@ -247,7 +247,7 @@ def latest_manifest(channel: str, target: str) -> dict[str, Any]:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No release found for target")
 
 
-@router.get("/updates/{channel}/{version}/{target}/{filename}")
+@router.get("/channels/{channel}/releases/{version}/{target}/{filename}")
 def binary(channel: str, version: str, target: str, filename: str) -> FileResponse:
     require_valid_channel(channel)
     require_valid_target(target)

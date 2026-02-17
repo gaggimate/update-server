@@ -37,7 +37,7 @@ poetry install
 ### 2) Run server
 
 ```bash
-poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+poetry run uvicorn update_server.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### 3) Run tests

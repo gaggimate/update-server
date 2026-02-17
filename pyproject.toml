@@ -1,5 +1,5 @@
 [project]
-name = "update-server"
+name = "update_server"
 version = "0.1.0"
 description = ""
 authors = [

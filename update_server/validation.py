@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, status
 
-from app.config import ALLOWED_CHANNELS, ALLOWED_TARGETS
+from update_server.config import ALLOWED_CHANNELS, ALLOWED_TARGETS
 
 
 def require_valid_channel(channel: str) -> None:
