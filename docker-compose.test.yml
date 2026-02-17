@@ -20,6 +20,6 @@ services:
     command: >
       sh -c "
       set -e;
-      curl --fail --silent http://app:8000/ | grep -q 'update-server';
-      curl --fail --silent http://app:8000/channels | grep -q '\"stable\"';
+      curl --fail --silent http://app:8000/api | grep -q 'update-server';
+      curl --fail --silent http://app:8000/api/channels | grep -q '\"stable\"';
       "
