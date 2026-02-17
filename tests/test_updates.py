@@ -111,6 +111,38 @@ class UpdateServerTests(unittest.TestCase):
             ],
         )
 
+    def test_release_listing_uses_semver_order_for_stable_and_git_describe_versions(self) -> None:
+        for version in ["v1.7.3", "v1.7.3-16-g011559ea", "v1.8.0", "v1.7.10"]:
+            response = self.client.post(
+                "/admin/releases/upload",
+                data={"channel": "stable", "version": version, "target": "controller"},
+                files=self._standard_files(),
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+
+        response = self.client.get("/releases/stable")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json()["versions"],
+            ["v1.8.0", "v1.7.10", "v1.7.3-16-g011559ea", "v1.7.3"],
+        )
+
+    def test_check_endpoint_compares_git_describe_versions_using_semver_order(self) -> None:
+        response = self.client.post(
+            "/admin/releases/upload",
+            data={"channel": "stable", "version": "v1.7.3-16-g011559ea", "target": "controller"},
+            files=self._standard_files(),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+
+        up_to_date = self.client.get("/check/stable", params={"controller_version": "v1.7.3-16-g011559ea"})
+        self.assertEqual(up_to_date.status_code, 200, up_to_date.text)
+        self.assertFalse(up_to_date.json()["updates"]["controller"]["updateAvailable"])
+
+        behind_tag = self.client.get("/check/stable", params={"controller_version": "v1.7.3"})
+        self.assertEqual(behind_tag.status_code, 200, behind_tag.text)
+        self.assertTrue(behind_tag.json()["updates"]["controller"]["updateAvailable"])
+
 
 if __name__ == "__main__":
     unittest.main()

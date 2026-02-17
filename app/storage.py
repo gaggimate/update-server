@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,11 @@ from fastapi import HTTPException, status
 from packaging.version import InvalidVersion, Version
 
 from app.config import UPDATE_STORAGE_DIR
+
+
+GIT_DESCRIBE_VERSION_RE = re.compile(
+    r"^v?(?P<base>\d+\.\d+\.\d+)(?:-(?P<distance>\d+)-g(?P<commit>[0-9a-fA-F]+))?$"
+)
 
 
 def channel_dir(channel: str) -> Path:
@@ -23,8 +29,15 @@ def release_metadata_path(channel: str, version: str) -> Path:
 
 
 def parse_version(raw: str) -> tuple[int, Any]:
+    match = GIT_DESCRIBE_VERSION_RE.fullmatch(raw)
+    if match:
+        base = match.group("base")
+        distance = match.group("distance")
+        parsed = f"{base}.post{distance}" if distance is not None else base
+        return (1, Version(parsed))
+
     try:
-        return (1, Version(raw))
+        return (1, Version(raw.lstrip("v")))
     except InvalidVersion:
         return (0, raw)
 
