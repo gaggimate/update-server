@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 import unittest
@@ -77,6 +78,38 @@ class UpdateServerTests(unittest.TestCase):
     def test_download_rejects_invalid_filename(self) -> None:
         response = self.client.get("/updates/stable/1.0.0/controller/../evil.bin")
         self.assertIn(response.status_code, [400, 404])
+
+    def test_upload_supports_version_specific_offsets_and_variable_parts(self) -> None:
+        response = self.client.post(
+            "/admin/releases/upload",
+            data={
+                "channel": "stable",
+                "version": "2.0.0",
+                "target": "controller",
+                "parts_json": json.dumps(
+                    [
+                        {"filename": "bootloader_v2.bin", "offset": 4096},
+                        {"filename": "factory_v2.bin", "offset": 131072},
+                    ]
+                ),
+            },
+            files=[
+                ("files", ("bootloader_v2.bin", b"boot2", "application/octet-stream")),
+                ("files", ("factory_v2.bin", b"factory2", "application/octet-stream")),
+            ],
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+
+        response = self.client.get("/updates/stable/2.0.0/controller/manifest")
+        self.assertEqual(response.status_code, 200, response.text)
+        parts = response.json()["builds"][0]["parts"]
+        self.assertEqual(
+            parts,
+            [
+                {"path": "/updates/stable/2.0.0/controller/bootloader_v2.bin", "offset": 4096},
+                {"path": "/updates/stable/2.0.0/controller/factory_v2.bin", "offset": 131072},
+            ],
+        )
 
 
 if __name__ == "__main__":
