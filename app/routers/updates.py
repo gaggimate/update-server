@@ -108,6 +108,7 @@ async def upload_release_target(
     chip_family: str = Form(DEFAULT_CHIP_FAMILY),
     label: str | None = Form(None),
     parts_json: str | None = Form(None),
+    offsets_json: str | None = Form(None),
     files: list[UploadFile] = File(...),
     x_api_key: str | None = Header(None),
 ) -> dict[str, Any]:
@@ -118,11 +119,29 @@ async def upload_release_target(
     if not files:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one file is required")
 
-    uploaded_names = set()
+    uploaded_names: set[str] = set()
+    ordered_uploaded_names: list[str] = []
     for file in files:
         if not file.filename:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each upload must have a filename")
-        uploaded_names.add(validate_filename(file.filename))
+        safe_name = validate_filename(file.filename)
+        if safe_name not in uploaded_names:
+            ordered_uploaded_names.append(safe_name)
+        uploaded_names.add(safe_name)
+
+    if parts_json and offsets_json:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide either parts_json or offsets_json, not both",
+        )
+
+    offsets: dict[str, int] = {}
+    if offsets_json:
+        try:
+            parsed_offsets = json.loads(offsets_json)
+            offsets = {validate_filename(name): int(offset) for name, offset in parsed_offsets.items()}
+        except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid offsets_json payload") from exc
 
     if parts_json:
         try:
@@ -133,11 +152,19 @@ async def upload_release_target(
         except (TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid parts_json payload") from exc
     else:
-        parts = [
-            {"filename": name, "offset": offset}
-            for name, offset in DEFAULT_PART_OFFSETS.items()
-            if name in uploaded_names
-        ]
+        parts = []
+        for name in ordered_uploaded_names:
+            if name in offsets:
+                offset = offsets[name]
+            elif name in DEFAULT_PART_OFFSETS:
+                offset = DEFAULT_PART_OFFSETS[name]
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Offset missing for part {name}; include it via offsets_json or parts_json",
+                )
+
+            parts.append({"filename": name, "offset": offset})
 
     if not parts:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No manifest parts could be generated")
