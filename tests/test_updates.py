@@ -20,6 +20,7 @@ class UpdateServerTests(unittest.TestCase):
         app_config.UPDATE_STORAGE_DIR = self.temp_dir
         app_storage.UPDATE_STORAGE_DIR = self.temp_dir
         app_security.ADMIN_API_KEY = None
+        app_security.ALLOW_UNAUTHENTICATED_UPLOADS = True
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -52,6 +53,8 @@ class UpdateServerTests(unittest.TestCase):
         manifest = response.json()
         self.assertEqual(manifest["version"], "1.0.0")
         self.assertEqual(manifest["builds"][0]["parts"][3]["path"], "/api/channels/stable/releases/1.0.0/controller/firmware.bin")
+        self.assertIn("sha256", manifest["builds"][0]["parts"][3])
+        self.assertIn("size", manifest["builds"][0]["parts"][3])
 
         response = self.client.get("/api/channels/stable/releases/1.0.0/controller/firmware.bin")
         self.assertEqual(response.status_code, 200, response.text)
@@ -66,6 +69,16 @@ class UpdateServerTests(unittest.TestCase):
             headers={"x-api-key": "wrong"},
         )
         self.assertEqual(response.status_code, 404, response.text)
+
+    def test_upload_disabled_if_no_api_key_and_unauth_not_allowed(self) -> None:
+        app_security.ADMIN_API_KEY = None
+        app_security.ALLOW_UNAUTHENTICATED_UPLOADS = False
+        response = self.client.post(
+            "/api/admin/releases/upload",
+            data={"channel": "stable", "version": "1.0.0", "target": "controller"},
+            files=self._standard_files(),
+        )
+        self.assertEqual(response.status_code, 503, response.text)
 
     def test_upload_rejects_invalid_filename(self) -> None:
         response = self.client.post(
@@ -90,6 +103,14 @@ class UpdateServerTests(unittest.TestCase):
         )
         self.assertEqual(second.status_code, 409, second.text)
         self.assertIn("cannot be overwritten", second.json()["detail"])
+
+    def test_upload_rejects_invalid_version_segment(self) -> None:
+        response = self.client.post(
+            "/api/admin/releases/upload",
+            data={"channel": "stable", "version": "../1.0.0", "target": "controller"},
+            files=self._standard_files(),
+        )
+        self.assertEqual(response.status_code, 400, response.text)
 
     def test_download_rejects_invalid_filename(self) -> None:
         response = self.client.get("/api/channels/stable/releases/1.0.0/controller/../evil.bin")
@@ -120,7 +141,7 @@ class UpdateServerTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         parts = response.json()["builds"][0]["parts"]
         self.assertEqual(
-            parts,
+            [{"path": p["path"], "offset": p["offset"]} for p in parts],
             [
                 {"path": "/api/channels/stable/releases/2.0.0/controller/bootloader_v2.bin", "offset": 4096},
                 {"path": "/api/channels/stable/releases/2.0.0/controller/factory_v2.bin", "offset": 131072},
