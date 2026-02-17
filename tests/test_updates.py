@@ -75,6 +75,22 @@ class UpdateServerTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400, response.text)
 
+    def test_upload_rejects_overwriting_existing_release_target(self) -> None:
+        first = self.client.post(
+            "/admin/releases/upload",
+            data={"channel": "stable", "version": "1.0.0", "target": "controller"},
+            files=self._standard_files(),
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+
+        second = self.client.post(
+            "/admin/releases/upload",
+            data={"channel": "stable", "version": "1.0.0", "target": "controller"},
+            files=self._standard_files(),
+        )
+        self.assertEqual(second.status_code, 409, second.text)
+        self.assertIn("cannot be overwritten", second.json()["detail"])
+
     def test_download_rejects_invalid_filename(self) -> None:
         response = self.client.get("/updates/stable/1.0.0/controller/../evil.bin")
         self.assertIn(response.status_code, [400, 404])
