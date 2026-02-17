@@ -103,7 +103,7 @@ if [[ -n "$API_KEY" ]]; then
   HEADER_ARGS+=( -H "x-api-key: ${API_KEY}" )
 fi
 
-UPLOAD_URL="${SERVER_URL%/}/admin/releases/upload"
+UPLOAD_URL="${SERVER_URL%/}/api/admin/releases/upload"
 
 echo "Uploading release ${VERSION} (${CHANNEL}/${TARGET}) to ${UPLOAD_URL}"
 

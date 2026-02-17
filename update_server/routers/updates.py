@@ -30,7 +30,7 @@ def manifest_for_target(channel: str, version: str, target_data: dict[str, Any])
                 "chipFamily": target_data.get("chipFamily", DEFAULT_CHIP_FAMILY),
                 "parts": [
                     {
-                        "path": f"/channels/{channel}/releases/{version}/{target_data['target']}/{part['filename']}",
+                        "path": f"/api/channels/{channel}/releases/{version}/{target_data['target']}/{part['filename']}",
                         "offset": part["offset"],
                     }
                     for part in target_data["parts"]
@@ -70,7 +70,7 @@ def check(channel: str, controller_version: str | None = None, display_version: 
             latest_for_target[target] = {
                 "releaseVersion": version,
                 "targetVersion": target_version,
-                "manifestUrl": f"/channels/{channel}/releases/{version}/{target}/manifest",
+                "manifestUrl": f"/api/channels/{channel}/releases/{version}/{target}/manifest",
             }
 
     updates: dict[str, Any] = {}
@@ -216,7 +216,7 @@ async def upload_release_target(
         "channel": channel,
         "version": version,
         "target": target,
-        "manifestUrl": f"/channels/{channel}/releases/{version}/{target}/manifest",
+        "manifestUrl": f"/api/channels/{channel}/releases/{version}/{target}/manifest",
     }
 
 

@@ -35,32 +35,32 @@ class UpdateServerTests(unittest.TestCase):
 
     def test_upload_check_manifest_and_binary(self) -> None:
         response = self.client.post(
-            "/admin/releases/upload",
+            "/api/admin/releases/upload",
             data={"channel": "stable", "version": "1.0.0", "target": "controller"},
             files=self._standard_files(),
         )
         self.assertEqual(response.status_code, 200, response.text)
 
-        response = self.client.get("/channels/stable/check", params={"controller_version": "0.9.0"})
+        response = self.client.get("/api/channels/stable/check", params={"controller_version": "0.9.0"})
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
         self.assertTrue(payload["updates"]["controller"]["updateAvailable"])
         self.assertEqual(payload["updates"]["controller"]["latest"], "1.0.0")
 
-        response = self.client.get("/channels/stable/releases/1.0.0/controller/manifest")
+        response = self.client.get("/api/channels/stable/releases/1.0.0/controller/manifest")
         self.assertEqual(response.status_code, 200, response.text)
         manifest = response.json()
         self.assertEqual(manifest["version"], "1.0.0")
-        self.assertEqual(manifest["builds"][0]["parts"][3]["path"], "/channels/stable/releases/1.0.0/controller/firmware.bin")
+        self.assertEqual(manifest["builds"][0]["parts"][3]["path"], "/api/channels/stable/releases/1.0.0/controller/firmware.bin")
 
-        response = self.client.get("/channels/stable/releases/1.0.0/controller/firmware.bin")
+        response = self.client.get("/api/channels/stable/releases/1.0.0/controller/firmware.bin")
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.content, b"firm")
 
     def test_auth_returns_404_on_wrong_api_key(self) -> None:
         app_security.ADMIN_API_KEY = "secret"
         response = self.client.post(
-            "/admin/releases/upload",
+            "/api/admin/releases/upload",
             data={"channel": "stable", "version": "1.0.0", "target": "controller"},
             files=[("files", ("firmware.bin", b"x", "application/octet-stream"))],
             headers={"x-api-key": "wrong"},
@@ -69,7 +69,7 @@ class UpdateServerTests(unittest.TestCase):
 
     def test_upload_rejects_invalid_filename(self) -> None:
         response = self.client.post(
-            "/admin/releases/upload",
+            "/api/admin/releases/upload",
             data={"channel": "stable", "version": "1.0.0", "target": "controller"},
             files=[("files", ("../evil.bin", b"x", "application/octet-stream"))],
         )
@@ -77,14 +77,14 @@ class UpdateServerTests(unittest.TestCase):
 
     def test_upload_rejects_overwriting_existing_release_target(self) -> None:
         first = self.client.post(
-            "/admin/releases/upload",
+            "/api/admin/releases/upload",
             data={"channel": "stable", "version": "1.0.0", "target": "controller"},
             files=self._standard_files(),
         )
         self.assertEqual(first.status_code, 200, first.text)
 
         second = self.client.post(
-            "/admin/releases/upload",
+            "/api/admin/releases/upload",
             data={"channel": "stable", "version": "1.0.0", "target": "controller"},
             files=self._standard_files(),
         )
@@ -92,12 +92,12 @@ class UpdateServerTests(unittest.TestCase):
         self.assertIn("cannot be overwritten", second.json()["detail"])
 
     def test_download_rejects_invalid_filename(self) -> None:
-        response = self.client.get("/channels/stable/releases/1.0.0/controller/../evil.bin")
+        response = self.client.get("/api/channels/stable/releases/1.0.0/controller/../evil.bin")
         self.assertIn(response.status_code, [400, 404])
 
     def test_upload_supports_version_specific_offsets_and_variable_parts(self) -> None:
         response = self.client.post(
-            "/admin/releases/upload",
+            "/api/admin/releases/upload",
             data={
                 "channel": "stable",
                 "version": "2.0.0",
@@ -116,27 +116,27 @@ class UpdateServerTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
 
-        response = self.client.get("/channels/stable/releases/2.0.0/controller/manifest")
+        response = self.client.get("/api/channels/stable/releases/2.0.0/controller/manifest")
         self.assertEqual(response.status_code, 200, response.text)
         parts = response.json()["builds"][0]["parts"]
         self.assertEqual(
             parts,
             [
-                {"path": "/channels/stable/releases/2.0.0/controller/bootloader_v2.bin", "offset": 4096},
-                {"path": "/channels/stable/releases/2.0.0/controller/factory_v2.bin", "offset": 131072},
+                {"path": "/api/channels/stable/releases/2.0.0/controller/bootloader_v2.bin", "offset": 4096},
+                {"path": "/api/channels/stable/releases/2.0.0/controller/factory_v2.bin", "offset": 131072},
             ],
         )
 
     def test_release_listing_uses_semver_order_for_stable_and_git_describe_versions(self) -> None:
         for version in ["v1.7.3", "v1.7.3-16-g011559ea", "v1.8.0", "v1.7.10"]:
             response = self.client.post(
-                "/admin/releases/upload",
+                "/api/admin/releases/upload",
                 data={"channel": "stable", "version": version, "target": "controller"},
                 files=self._standard_files(),
             )
             self.assertEqual(response.status_code, 200, response.text)
 
-        response = self.client.get("/channels/stable/releases")
+        response = self.client.get("/api/channels/stable/releases")
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(
             response.json()["versions"],
@@ -145,19 +145,25 @@ class UpdateServerTests(unittest.TestCase):
 
     def test_check_endpoint_compares_git_describe_versions_using_semver_order(self) -> None:
         response = self.client.post(
-            "/admin/releases/upload",
+            "/api/admin/releases/upload",
             data={"channel": "stable", "version": "v1.7.3-16-g011559ea", "target": "controller"},
             files=self._standard_files(),
         )
         self.assertEqual(response.status_code, 200, response.text)
 
-        up_to_date = self.client.get("/channels/stable/check", params={"controller_version": "v1.7.3-16-g011559ea"})
+        up_to_date = self.client.get("/api/channels/stable/check", params={"controller_version": "v1.7.3-16-g011559ea"})
         self.assertEqual(up_to_date.status_code, 200, up_to_date.text)
         self.assertFalse(up_to_date.json()["updates"]["controller"]["updateAvailable"])
 
-        behind_tag = self.client.get("/channels/stable/check", params={"controller_version": "v1.7.3"})
+        behind_tag = self.client.get("/api/channels/stable/check", params={"controller_version": "v1.7.3"})
         self.assertEqual(behind_tag.status_code, 200, behind_tag.text)
         self.assertTrue(behind_tag.json()["updates"]["controller"]["updateAvailable"])
+
+    def test_root_serves_html_flasher_page(self) -> None:
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("text/html", response.headers["content-type"])
+        self.assertIn("Device Firmware Flasher", response.text)
 
 
 if __name__ == "__main__":
