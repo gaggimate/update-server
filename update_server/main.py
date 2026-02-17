@@ -20,6 +20,7 @@ def flash_page(request: Request, channel: str = "stable") -> HTMLResponse:
 
     releases = list_release_versions(selected_channel)
     latest_release = releases[0] if releases else None
+    previous_releases = releases[1:] if len(releases) > 1 else []
 
     targets = [
         {
@@ -41,6 +42,7 @@ def flash_page(request: Request, channel: str = "stable") -> HTMLResponse:
             "selected_channel": selected_channel,
             "targets": targets,
             "latest_release": latest_release,
+            "previous_releases": previous_releases,
         },
     )
 
