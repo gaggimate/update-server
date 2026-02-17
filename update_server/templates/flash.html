@@ -46,6 +46,24 @@
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       gap: 1rem;
     }
+    .versions {
+      margin: 1rem 0 1.25rem;
+      border: 1px solid #374151;
+      border-radius: 10px;
+      background: #0b1220;
+      padding: 0.5rem 0.75rem;
+    }
+    .versions summary {
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .versions ul {
+      margin: 0.65rem 0 0.25rem;
+      padding-left: 1.25rem;
+    }
+    .versions li {
+      margin: 0.25rem 0;
+    }
     .card {
       border: 1px solid #374151;
       border-radius: 10px;
@@ -90,6 +108,17 @@
         <span class="hint">No releases uploaded yet for this channel.</span>
       {% endif %}
     </form>
+
+    {% if previous_releases %}
+      <details class="versions">
+        <summary>Previous versions ({{ previous_releases | length }})</summary>
+        <ul>
+          {% for release in previous_releases %}
+            <li>{{ release }}</li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% endif %}
 
     <section class="grid">
       {% for target in targets %}

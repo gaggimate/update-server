@@ -180,6 +180,23 @@ class UpdateServerTests(unittest.TestCase):
         self.assertEqual(behind_tag.status_code, 200, behind_tag.text)
         self.assertTrue(behind_tag.json()["updates"]["controller"]["updateAvailable"])
 
+    def test_root_serves_previous_versions_collapsed(self) -> None:
+        for version in ["v1.2.0", "v1.1.0", "v1.0.0"]:
+            response = self.client.post(
+                "/api/admin/releases/upload",
+                data={"channel": "stable", "version": version, "target": "controller"},
+                files=self._standard_files(),
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("Latest release: <strong>v1.2.0</strong>", response.text)
+        self.assertIn("<details class=\"versions\">", response.text)
+        self.assertIn("<summary>Previous versions (2)</summary>", response.text)
+        self.assertIn("<li>v1.1.0</li>", response.text)
+        self.assertIn("<li>v1.0.0</li>", response.text)
+
     def test_root_serves_html_flasher_page(self) -> None:
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200, response.text)
