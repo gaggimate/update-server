@@ -1,0 +1,25 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: update-server:test
+    environment:
+      UPDATE_STORAGE_DIR: /data/storage
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/').read()"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  smoke-test:
+    image: curlimages/curl:8.12.1
+    depends_on:
+      app:
+        condition: service_healthy
+    command: >
+      sh -c "
+      set -e;
+      curl --fail --silent http://app:8000/ | grep -q 'update-server';
+      curl --fail --silent http://app:8000/channels | grep -q '\"channels\"';
+      "

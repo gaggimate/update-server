@@ -46,6 +46,22 @@ poetry run uvicorn update_server.main:app --reload --host 0.0.0.0 --port 8000
 poetry run python -m unittest discover -s tests -v
 ```
 
+## Docker
+
+### Build and run locally
+
+```bash
+docker build -t update-server:local .
+docker run --rm -p 8000:8000 -e UPDATE_STORAGE_DIR=/data/storage update-server:local
+```
+
+### Docker Compose smoke test
+
+```bash
+docker compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from smoke-test
+docker compose -f docker-compose.test.yml down -v --remove-orphans
+```
+
 ## Uploading firmware locally
 
 You can upload with plain `curl`:
