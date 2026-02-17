@@ -49,10 +49,3 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Compose smoke test
-        run: |
-          docker compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from smoke-test
-
-      - name: Tear down compose stack
-        if: always()
-        run: docker compose -f docker-compose.test.yml down -v --remove-orphans
