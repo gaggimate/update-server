@@ -126,7 +126,6 @@
           <h2>{{ target.label }}</h2>
           {% if latest_release %}
             <esp-web-install-button manifest="{{ target.manifest_url }}"></esp-web-install-button>
-            <code>{{ target.manifest_url }}</code>
           {% else %}
             <p class="hint">No firmware available for this channel yet.</p>
           {% endif %}

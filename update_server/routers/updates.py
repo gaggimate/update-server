@@ -253,20 +253,6 @@ async def upload_release_target(
     }
 
 
-@router.get("/channels/{channel}/releases/{version}/{target}/manifest")
-def manifest(channel: str, version: str, target: str) -> dict[str, Any]:
-    require_valid_channel(channel)
-    require_valid_version(version)
-    require_valid_target(target)
-
-    release = load_release(channel, version)
-    target_data = release.get("targets", {}).get(target)
-    if not target_data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target build not found")
-
-    return manifest_for_target(channel, version, target_data)
-
-
 @router.get("/channels/{channel}/releases/latest/{target}/manifest")
 def latest_manifest(channel: str, target: str) -> dict[str, Any]:
     require_valid_channel(channel)
@@ -279,6 +265,20 @@ def latest_manifest(channel: str, target: str) -> dict[str, Any]:
             return manifest_for_target(channel, version, target_data)
 
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No release found for target")
+
+
+@router.get("/channels/{channel}/releases/{version}/{target}/manifest")
+def manifest(channel: str, version: str, target: str) -> dict[str, Any]:
+    require_valid_channel(channel)
+    require_valid_version(version)
+    require_valid_target(target)
+
+    release = load_release(channel, version)
+    target_data = release.get("targets", {}).get(target)
+    if not target_data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target build not found")
+
+    return manifest_for_target(channel, version, target_data)
 
 
 @router.get("/channels/{channel}/releases/{version}/{target}/{filename}")
