@@ -18,6 +18,7 @@ DEFAULT_PART_OFFSETS = {
     "partitions.bin": 32768,
     "boot_app0.bin": 57344,
     "firmware.bin": 65536,
+    "filesystem.bin": 13172736
 }
 
 

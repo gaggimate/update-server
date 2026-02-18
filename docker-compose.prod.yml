@@ -1,0 +1,56 @@
+services:
+  app:
+    image: ghcr.io/gaggimate/update-server:main
+    restart: unless-stopped
+    environment:
+      UPDATE_STORAGE_DIR: /data/storage
+    volumes:
+      - ./storage:/data/storage:rw
+    user: 1001
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/').read()"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ota.rule=Host(`ota.gaggimate.eu`)"
+      - "traefik.http.routers.ota.entrypoints=websecure"
+      - "traefik.http.routers.ota.tls.certresolver=le"
+      - "traefik.http.routers.ota.tls=true"
+
+  traefik:
+    image: "traefik:v3.4"
+    container_name: "traefik"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - proxy
+    command:
+      - "--api.insecure=false"
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=proxy"
+      - "--entryPoints.web.address=:80"
+      - "--entryPoints.websecure.address=:443"
+      - "--entryPoints.websecure.http.tls=true"
+      - "--entryPoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entryPoints.web.http.redirections.entryPoint.scheme=https"
+      # Let's Encrypt configuration
+      - "--certificatesresolvers.le.acme.email=jniebuhr@caffinnova.it" # replace with your actual email
+      - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.le.acme.httpchallenge.entrypoint=web"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+
+networks:
+  proxy:
+    name: proxy
