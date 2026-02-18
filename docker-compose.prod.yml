@@ -40,8 +40,7 @@ services:
       - "--entryPoints.websecure.http.tls=true"
       - "--entryPoints.web.http.redirections.entryPoint.to=websecure"
       - "--entryPoints.web.http.redirections.entryPoint.scheme=https"
-      # Let's Encrypt configuration
-      - "--certificatesresolvers.le.acme.email=jniebuhr@caffinnova.it" # replace with your actual email
+      - "--certificatesresolvers.le.acme.email=mail@gaggimate.eu"
       - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
       - "--certificatesresolvers.le.acme.httpchallenge.entrypoint=web"
     ports:

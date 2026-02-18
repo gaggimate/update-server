@@ -81,8 +81,6 @@ curl -X POST http://localhost:8000/api/admin/releases/upload \
   -F files=@firmware.bin
 ```
 
-If your filenames are not one of the default ESP offsets, pass `parts_json` (or `offsets_json`) as documented in `app/routers/updates.py`.
-
 ## CI-friendly upload script
 
 Use `scripts/upload_release.sh` for local and CI uploads.
@@ -109,49 +107,3 @@ scripts/upload_release.sh \
 - `--label <manifest label>`
 - `--parts-json-file <path>` (for explicit per-file offsets)
 - `--offsets-json-file <path>`
-
-## GitHub Actions firmware upload (for firmware repos)
-
-The workflow in `.github/workflows/upload-firmware.yml` is designed to run in the **firmware-producing repository**, not only in this server repo.
-
-It uploads firmware directly with `curl` and does **not** depend on `scripts/upload_release.sh`, so it is safe to copy as-is into another repository.
-
-### Option A: Copy workflow into your firmware repo
-
-Copy `.github/workflows/upload-firmware.yml` to your firmware project and run it with `workflow_dispatch`.
-
-### Option B: Reuse this workflow from another repo
-
-You can also call it as a reusable workflow:
-
-```yaml
-name: Publish firmware
-
-on:
-  workflow_dispatch:
-
-jobs:
-  publish:
-    uses: <owner>/<update-server-repo>/.github/workflows/upload-firmware.yml@main
-    with:
-      channel: stable
-      version: 1.2.3
-      target: controller
-      firmware_dir: firmware
-      firmware_files: bootloader.bin,partitions.bin,boot_app0.bin,firmware.bin
-    secrets:
-      UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
-      UPDATE_SERVER_API_KEY: ${{ secrets.UPDATE_SERVER_API_KEY }}
-```
-
-### Required secrets in the firmware repo
-
-- `UPDATE_SERVER_URL` (e.g. `https://updates.example.com`)
-- `UPDATE_SERVER_API_KEY` (only needed when server enforces auth)
-
-### Workflow inputs
-
-- `channel`, `version`, `target`
-- `firmware_dir` + `firmware_files` (comma-separated)
-- optional metadata: `component_version`, `chip_family`, `label`
-- optional mapping file: `parts_json_file` **or** `offsets_json_file`
