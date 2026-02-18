@@ -18,8 +18,8 @@ def require_admin_auth_or_404(x_api_key: str | None) -> None:
 
     if not ALLOW_UNAUTHENTICATED_UPLOADS:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Upload endpoint disabled: ADMIN_API_KEY is not configured",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not found",
         )
 
 
