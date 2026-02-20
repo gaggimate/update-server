@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 import tempfile
 import unittest
@@ -123,12 +122,6 @@ class UpdateServerTests(unittest.TestCase):
                 "channel": "stable",
                 "version": "2.0.0",
                 "target": "controller",
-                "parts_json": json.dumps(
-                    [
-                        {"filename": "bootloader_v2.bin", "offset": 4096},
-                        {"filename": "factory_v2.bin", "offset": 131072},
-                    ]
-                ),
             },
             files=[
                 ("files", ("bootloader_v2.bin", b"boot2", "application/octet-stream")),
@@ -140,13 +133,59 @@ class UpdateServerTests(unittest.TestCase):
         response = self.client.get("/api/channels/stable/releases/2.0.0/controller/manifest")
         self.assertEqual(response.status_code, 200, response.text)
         parts = response.json()["builds"][0]["parts"]
-        self.assertEqual(
-            [{"path": p["path"], "offset": p["offset"]} for p in parts],
-            [
-                {"path": "/api/channels/stable/releases/2.0.0/controller/bootloader_v2.bin", "offset": 4096},
-                {"path": "/api/channels/stable/releases/2.0.0/controller/factory_v2.bin", "offset": 131072},
-            ],
+        self.assertEqual(parts, [])
+
+    def test_release_version_details_includes_all_targets_and_files(self) -> None:
+        controller_upload = self.client.post(
+            "/api/admin/releases/upload",
+            data={"channel": "stable", "version": "3.0.0", "target": "controller"},
+            files=self._standard_files() + [("files", ("readme.txt", b"hello", "text/plain"))],
         )
+        self.assertEqual(controller_upload.status_code, 200, controller_upload.text)
+
+        display_upload = self.client.post(
+            "/api/admin/releases/upload",
+            data={"channel": "stable", "version": "3.0.0", "target": "display"},
+            files=[("files", ("display.bin", b"disp", "application/octet-stream"))],
+        )
+        self.assertEqual(display_upload.status_code, 200, display_upload.text)
+
+        details_response = self.client.get("/api/channels/stable/releases/3.0.0")
+        self.assertEqual(details_response.status_code, 200, details_response.text)
+        details = details_response.json()
+
+        self.assertEqual(set(details["targets"].keys()), {"controller", "display"})
+        controller_files = details["targets"]["controller"]["files"]
+        controller_file_names = {item["filename"] for item in controller_files}
+        self.assertIn("firmware.bin", controller_file_names)
+        self.assertIn("readme.txt", controller_file_names)
+
+        readme_file = [item for item in controller_files if item["filename"] == "readme.txt"][0]
+        self.assertIsNone(readme_file["offset"])
+        self.assertEqual(readme_file["path"], "/api/channels/stable/releases/3.0.0/controller/readme.txt")
+
+    def test_upload_accepts_signed_sha256_and_exposes_it(self) -> None:
+        signed_hashes = """-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA256
+
+"""
+        signed_hashes += "3f62550731d942f8bb6b5deb60037847212ca7092c2f2d0d932bce230a0caf26  firmware.bin\n"
+        signed_hashes += "-----BEGIN PGP SIGNATURE-----\nabc\n-----END PGP SIGNATURE-----\n"
+
+        response = self.client.post(
+            "/api/admin/releases/upload",
+            data={
+                "channel": "stable",
+                "version": "4.0.0",
+                "target": "controller",
+                "signed_sha256": signed_hashes,
+            },
+            files=[("files", ("firmware.bin", b"firm", "application/octet-stream"))],
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+
+        details = self.client.get("/api/channels/stable/releases/4.0.0").json()
+        self.assertIn("PGP SIGNATURE", details["targets"]["controller"]["signedSha256"])
 
     def test_release_listing_uses_semver_order_for_stable_and_git_describe_versions(self) -> None:
         for version in ["v1.7.3", "v1.7.3-16-g011559ea", "v1.8.0", "v1.7.10"]:

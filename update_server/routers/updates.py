@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -43,6 +42,30 @@ def manifest_for_target(channel: str, version: str, target_data: dict[str, Any])
                 ],
             }
         ],
+    }
+
+
+def target_details_for_version(channel: str, version: str, target_data: dict[str, Any]) -> dict[str, Any]:
+    part_offsets = {part["filename"]: part["offset"] for part in target_data.get("parts", [])}
+
+    return {
+        "target": target_data["target"],
+        "name": target_data.get("label") or TARGET_LABELS.get(target_data["target"], target_data["target"]),
+        "version": target_data.get("componentVersion") or version,
+        "chipFamily": target_data.get("chipFamily", DEFAULT_CHIP_FAMILY),
+        "manifestUrl": f"/api/channels/{channel}/releases/{version}/{target_data['target']}/manifest",
+        "files": [
+            {
+                "filename": artifact["filename"],
+                "path": f"/api/channels/{channel}/releases/{version}/{target_data['target']}/{artifact['filename']}",
+                "offset": part_offsets.get(artifact["filename"]),
+                "sha256": artifact.get("sha256"),
+                "size": artifact.get("size"),
+            }
+            for artifact in target_data.get("artifacts", [])
+        ],
+        "signedSha256": target_data.get("signedSha256"),
+        "updatedAt": target_data.get("updatedAt"),
     }
 
 
@@ -113,8 +136,7 @@ async def upload_release_target(
     component_version: str | None = Form(None),
     chip_family: str = Form(DEFAULT_CHIP_FAMILY),
     label: str | None = Form(None),
-    parts_json: str | None = Form(None),
-    offsets_json: str | None = Form(None),
+    signed_sha256: str | None = Form(None),
     files: list[UploadFile] = File(...),
     x_api_key: str | None = Header(None),
 ) -> dict[str, Any]:
@@ -136,45 +158,7 @@ async def upload_release_target(
             ordered_uploaded_names.append(safe_name)
         uploaded_names.add(safe_name)
 
-    if parts_json and offsets_json:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provide either parts_json or offsets_json, not both",
-        )
-
-    offsets: dict[str, int] = {}
-    if offsets_json:
-        try:
-            parsed_offsets = json.loads(offsets_json)
-            offsets = {validate_filename(name): int(offset) for name, offset in parsed_offsets.items()}
-        except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid offsets_json payload") from exc
-
-    if parts_json:
-        try:
-            parts_data = json.loads(parts_json)
-            parts = [
-                {"filename": validate_filename(item["filename"]), "offset": int(item["offset"])} for item in parts_data
-            ]
-        except (TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid parts_json payload") from exc
-    else:
-        parts = []
-        for name in ordered_uploaded_names:
-            if name in offsets:
-                offset = offsets[name]
-            elif name in DEFAULT_PART_OFFSETS:
-                offset = DEFAULT_PART_OFFSETS[name]
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Offset missing for part {name}; include it via offsets_json or parts_json",
-                )
-
-            parts.append({"filename": name, "offset": offset})
-
-    if not parts:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No manifest parts could be generated")
+    parts = [{"filename": name, "offset": DEFAULT_PART_OFFSETS[name]} for name in ordered_uploaded_names if name in DEFAULT_PART_OFFSETS]
 
     for part in parts:
         if part["filename"] not in uploaded_names:
@@ -233,13 +217,45 @@ async def upload_release_target(
             "sha256": digest.hexdigest(),
         }
 
+    if signed_sha256:
+        hashes_in_signature: dict[str, str] = {}
+        for line in signed_sha256.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("-"):
+                continue
+            fields = stripped.split()
+            if len(fields) >= 2 and len(fields[0]) == 64:
+                candidate_hash = fields[0].lower()
+                if all(ch in "0123456789abcdef" for ch in candidate_hash):
+                    candidate_file = validate_filename(fields[-1].lstrip("*"))
+                    hashes_in_signature[candidate_file] = candidate_hash
+
+        if not hashes_in_signature:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="signed_sha256 must include at least one sha256sum-style line",
+            )
+
+        for filename, expected_hash in hashes_in_signature.items():
+            if filename not in artifacts:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"signed_sha256 references missing upload {filename}",
+                )
+            if artifacts[filename]["sha256"] != expected_hash:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"signed_sha256 hash mismatch for {filename}",
+                )
+
     release.setdefault("targets", {})[target] = {
         "target": target,
         "label": label or TARGET_LABELS.get(target, target),
         "chipFamily": chip_family,
         "componentVersion": component_version or version,
         "parts": parts,
-        "artifacts": [artifacts[part["filename"]] for part in parts],
+        "artifacts": [artifacts[name] for name in ordered_uploaded_names],
+        "signedSha256": signed_sha256,
         "updatedAt": datetime.now(timezone.utc).isoformat(),
     }
     save_release(channel, version, release)
@@ -250,6 +266,25 @@ async def upload_release_target(
         "version": version,
         "target": target,
         "manifestUrl": f"/api/channels/{channel}/releases/{version}/{target}/manifest",
+        "versionDetailsUrl": f"/api/channels/{channel}/releases/{version}",
+    }
+
+
+@router.get("/channels/{channel}/releases/{version}")
+def version_details(channel: str, version: str) -> dict[str, Any]:
+    require_valid_channel(channel)
+    require_valid_version(version)
+
+    release = load_release(channel, version)
+
+    return {
+        "channel": channel,
+        "version": version,
+        "createdAt": release.get("createdAt"),
+        "targets": {
+            target: target_details_for_version(channel, version, target_data)
+            for target, target_data in release.get("targets", {}).items()
+        },
     }
 
 
