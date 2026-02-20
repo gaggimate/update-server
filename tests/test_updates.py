@@ -78,7 +78,7 @@ class UpdateServerTests(unittest.TestCase):
             data={"channel": "stable", "version": "1.0.0", "target": "controller"},
             files=self._standard_files(),
         )
-        self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(response.status_code, 404, response.text)
 
     def test_upload_rejects_invalid_filename(self) -> None:
         response = self.client.post(
