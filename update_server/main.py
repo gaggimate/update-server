@@ -1,14 +1,21 @@
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from update_server.config import ALLOWED_CHANNELS, ALLOWED_TARGETS, TARGET_LABELS
+from update_server.config import ALLOWED_CHANNELS, ALLOWED_TARGETS, DEFAULT_CORS_ALLOW_ORIGIN_REGEX, TARGET_LABELS
 from update_server.routers.updates import router as updates_router
 from update_server.storage import list_release_versions
 
 app = FastAPI(title="Update Server")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=DEFAULT_CORS_ALLOW_ORIGIN_REGEX,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(updates_router, prefix="/api")
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))

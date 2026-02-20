@@ -242,6 +242,50 @@ Hash: SHA256
         self.assertIn("text/html", response.headers["content-type"])
         self.assertIn("Device Firmware Flasher", response.text)
 
+    def test_cors_allows_local_domain_origin(self) -> None:
+        response = self.client.options(
+            "/api",
+            headers={
+                "Origin": "http://dashboard.kitchen.local:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), "http://dashboard.kitchen.local:5173")
+
+    def test_cors_allows_single_label_hostname_origin(self) -> None:
+        response = self.client.options(
+            "/api",
+            headers={
+                "Origin": "http://raspberrypi:8080",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), "http://raspberrypi:8080")
+
+    def test_cors_allows_private_ipv4_origin(self) -> None:
+        response = self.client.options(
+            "/api",
+            headers={
+                "Origin": "http://192.168.1.99:3000",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), "http://192.168.1.99:3000")
+
+    def test_cors_rejects_public_domain_origin(self) -> None:
+        response = self.client.options(
+            "/api",
+            headers={
+                "Origin": "https://example.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIsNone(response.headers.get("access-control-allow-origin"))
+
 
 if __name__ == "__main__":
     unittest.main()
