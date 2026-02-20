@@ -232,9 +232,16 @@ Hash: SHA256
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn("Latest release: <strong>v1.2.0</strong>", response.text)
         self.assertIn("<details class=\"versions\">", response.text)
-        self.assertIn("<summary>Previous versions (2)</summary>", response.text)
-        self.assertIn("<li>v1.1.0</li>", response.text)
-        self.assertIn("<li>v1.0.0</li>", response.text)
+        self.assertIn("<summary>v1.1.0</summary>", response.text)
+        self.assertIn("<summary>v1.0.0</summary>", response.text)
+        self.assertIn(
+            "manifest=\"/api/channels/stable/releases/v1.1.0/controller/manifest\"",
+            response.text,
+        )
+        self.assertIn(
+            "manifest=\"/api/channels/stable/releases/v1.0.0/controller/manifest\"",
+            response.text,
+        )
 
     def test_root_serves_html_flasher_page(self) -> None:
         response = self.client.get("/")

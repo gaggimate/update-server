@@ -34,11 +34,23 @@ def flash_page(request: Request, channel: str = "stable") -> HTMLResponse:
             "name": target,
             "label": TARGET_LABELS.get(target, target),
             "manifest_url": f"/api/channels/{selected_channel}/releases/latest/{target}/manifest",
-            "latest_manifest_url": (
-                f"/api/channels/{selected_channel}/releases/{latest_release}/{target}/manifest" if latest_release else None
-            ),
         }
         for target in ALLOWED_TARGETS
+    ]
+
+    previous_release_targets = [
+        {
+            "version": release,
+            "targets": [
+                {
+                    "name": target,
+                    "label": TARGET_LABELS.get(target, target),
+                    "manifest_url": f"/api/channels/{selected_channel}/releases/{release}/{target}/manifest",
+                }
+                for target in ALLOWED_TARGETS
+            ],
+        }
+        for release in previous_releases
     ]
 
     return templates.TemplateResponse(
@@ -50,6 +62,7 @@ def flash_page(request: Request, channel: str = "stable") -> HTMLResponse:
             "targets": targets,
             "latest_release": latest_release,
             "previous_releases": previous_releases,
+            "previous_release_targets": previous_release_targets,
         },
     )
 
