@@ -9,8 +9,7 @@ API_KEY="${ADMIN_API_KEY:-}"
 COMPONENT_VERSION=""
 CHIP_FAMILY=""
 LABEL=""
-PARTS_JSON_FILE=""
-OFFSETS_JSON_FILE=""
+SIGNED_SHA256_FILE=""
 
 FILES=()
 
@@ -26,8 +25,7 @@ Usage: $0 \
   [--component-version <version>] \
   [--chip-family <family>] \
   [--label <label>] \
-  [--parts-json-file <path>] \
-  [--offsets-json-file <path>]
+  [--signed-sha256-file <path>]
 USAGE
 }
 
@@ -42,8 +40,7 @@ while [[ $# -gt 0 ]]; do
     --component-version) COMPONENT_VERSION="$2"; shift 2 ;;
     --chip-family) CHIP_FAMILY="$2"; shift 2 ;;
     --label) LABEL="$2"; shift 2 ;;
-    --parts-json-file) PARTS_JSON_FILE="$2"; shift 2 ;;
-    --offsets-json-file) OFFSETS_JSON_FILE="$2"; shift 2 ;;
+    --signed-sha256-file) SIGNED_SHA256_FILE="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 1 ;;
   esac
@@ -60,17 +57,17 @@ if [[ ${#FILES[@]} -eq 0 ]]; then
   exit 1
 fi
 
-if [[ -n "$PARTS_JSON_FILE" && -n "$OFFSETS_JSON_FILE" ]]; then
-  echo "Use either --parts-json-file or --offsets-json-file, not both" >&2
-  exit 1
-fi
-
 for file in "${FILES[@]}"; do
   if [[ ! -f "$file" ]]; then
     echo "Firmware file not found: $file" >&2
     exit 1
   fi
 done
+
+if [[ -n "$SIGNED_SHA256_FILE" && ! -f "$SIGNED_SHA256_FILE" ]]; then
+  echo "Signed sha256 file not found: $SIGNED_SHA256_FILE" >&2
+  exit 1
+fi
 
 FORM_ARGS=(
   -F "channel=${CHANNEL}"
@@ -87,11 +84,8 @@ fi
 if [[ -n "$LABEL" ]]; then
   FORM_ARGS+=( -F "label=${LABEL}" )
 fi
-if [[ -n "$PARTS_JSON_FILE" ]]; then
-  FORM_ARGS+=( -F "parts_json=$(cat "$PARTS_JSON_FILE")" )
-fi
-if [[ -n "$OFFSETS_JSON_FILE" ]]; then
-  FORM_ARGS+=( -F "offsets_json=$(cat "$OFFSETS_JSON_FILE")" )
+if [[ -n "$SIGNED_SHA256_FILE" ]]; then
+  FORM_ARGS+=( -F "signed_sha256=$(cat "$SIGNED_SHA256_FILE")" )
 fi
 
 for file in "${FILES[@]}"; do
