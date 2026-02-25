@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
+import aiofiles
 from pathlib import Path
-from typing import Any
+from typing import Any, Annotated
+
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
@@ -130,15 +132,13 @@ def check(channel: str, controller_version: str | None = None, display_version: 
 
 @router.post("/admin/releases/upload")
 async def upload_release_target(
-    channel: str = Form(...),
-    version: str = Form(...),
-    target: str = Form(...),
-    component_version: str | None = Form(None),
-    chip_family: str = Form(DEFAULT_CHIP_FAMILY),
-    label: str | None = Form(None),
-    signed_sha256: str | None = Form(None),
-    files: list[UploadFile] = File(...),
-    x_api_key: str | None = Header(None),
+    channel: Annotated[str, Form()],
+    version: Annotated[str, Form()],
+    target: Annotated[str, Form()],
+    chip_family: Annotated[str, Form()] = DEFAULT_CHIP_FAMILY,
+    signed_sha256: Annotated[str | None, Form()] = None,
+    files: list[UploadFile] = None,
+    x_api_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     require_valid_channel(channel)
     require_valid_version(version)
@@ -159,15 +159,6 @@ async def upload_release_target(
         uploaded_names.add(safe_name)
 
     parts = [{"filename": name, "offset": DEFAULT_PART_OFFSETS[name]} for name in ordered_uploaded_names if name in DEFAULT_PART_OFFSETS]
-
-    for part in parts:
-        if part["filename"] not in uploaded_names:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Missing upload for part {part['filename']}",
-            )
-        if part["offset"] < 0:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Offsets must be non-negative")
 
     try:
         release = load_release(channel, version)
@@ -190,26 +181,25 @@ async def upload_release_target(
 
     artifacts: dict[str, dict[str, Any]] = {}
     for file in files:
-        filename = validate_filename(file.filename or "")
+        filename = validate_filename(file.filename)
         destination = target_directory / filename
 
         digest = hashlib.sha256()
         bytes_written = 0
-        with Path(destination).open("wb") as out:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
+        async with aiofiles.open(destination, "wb") as out:
+            while content := await file.read(1024):
+                if not content:
                     break
-                bytes_written += len(chunk)
+                bytes_written += len(content)
                 if bytes_written > MAX_UPLOAD_FILE_SIZE_BYTES:
-                    out.close()
+                    await out.close()
                     destination.unlink(missing_ok=True)
                     raise HTTPException(
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                         detail=f"File {filename} exceeds max upload size of {MAX_UPLOAD_FILE_SIZE_BYTES} bytes",
                     )
-                out.write(chunk)
-                digest.update(chunk)
+                await out.write(content)
+                digest.update(content)
 
         artifacts[filename] = {
             "filename": filename,
@@ -250,9 +240,9 @@ async def upload_release_target(
 
     release.setdefault("targets", {})[target] = {
         "target": target,
-        "label": label or TARGET_LABELS.get(target, target),
+        "label": TARGET_LABELS.get(target, target),
         "chipFamily": chip_family,
-        "componentVersion": component_version or version,
+        "componentVersion": version,
         "parts": parts,
         "artifacts": [artifacts[name] for name in ordered_uploaded_names],
         "signedSha256": signed_sha256,

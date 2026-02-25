@@ -27,6 +27,7 @@ Usage: $0 \
   [--label <label>] \
   [--signed-sha256-file <path>]
 USAGE
+  return
 }
 
 while [[ $# -gt 0 ]]; do
