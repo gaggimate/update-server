@@ -29,7 +29,7 @@ def manifest_for_target(channel: str, version: str, target_data: dict[str, Any])
     return {
         "name": target_data.get("label") or TARGET_LABELS.get(target_data["target"], target_data["target"]),
         "version": target_data.get("componentVersion") or version,
-        "new_install_prompt_erase": False,
+        "new_install_prompt_erase": True,
         "builds": [
             {
                 "chipFamily": target_data.get("chipFamily", DEFAULT_CHIP_FAMILY),
