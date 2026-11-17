@@ -1,0 +1,121 @@
+#!/bin/bash
+# Deploy one published build of the update server on the OTA host.
+#
+#   ota-deploy sha-<commit>
+#
+# Pulls ghcr.io/gaggimate/update-server:sha-<commit>, starts it, checks that the site answers and puts the
+# previous build back if it does not. Exit code 0 means the requested build is running and healthy.
+#
+# The GitHub Actions deploy job reaches this script through a restricted SSH key that can run nothing
+# else (see deploy/README.md), so the only thing a stolen deploy key can do is start a build that was
+# already published. This file is installed on the server by hand as /usr/local/sbin/ota-deploy; it is
+# deliberately not updated by the pipeline.
+set -euo pipefail
+
+REPOSITORY=ghcr.io/gaggimate/update-server
+COMPOSE_DIR=/app
+SERVICE=app
+ENV_FILE=$COMPOSE_DIR/.env
+STATE_DIR=/var/lib/ota-deploy
+SITE=ota.gaggimate.eu
+# Each must answer 200 through the local Traefik: liveness, the flasher page, and a read from storage.
+HEALTH_PATHS="/api / /api/channels/stable/releases"
+HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-90}
+
+log() { echo "ota-deploy: $*"; }
+
+tag=${1:-}
+if ! [[ "$tag" =~ ^sha-[0-9a-f]{7,40}$ ]]; then
+    log "refusing: expected exactly one argument of the form sha-<commit>"
+    exit 2
+fi
+image="$REPOSITORY:$tag"
+
+exec 9>/run/lock/ota-deploy.lock
+if ! flock -n 9; then
+    log "another deployment is in progress"
+    exit 75
+fi
+
+cd "$COMPOSE_DIR"
+mkdir -p "$STATE_DIR"
+
+container() { docker compose ps -q "$SERVICE"; }
+
+running_image_id() { docker inspect --format '{{.Image}}' "$(container)" 2>/dev/null || true; }
+
+healthy() {
+    local id path
+    id=$(container)
+    [ -n "$id" ] || return 1
+    [ "$(docker inspect --format '{{.State.Health.Status}}' "$id" 2>/dev/null)" = healthy ] || return 1
+    for path in $HEALTH_PATHS; do
+        [ "$(curl -s -o /dev/null -m 5 -w '%{http_code}' --resolve "$SITE:443:127.0.0.1" "https://$SITE$path")" = 200 ] || return 1
+    done
+}
+
+wait_healthy() {
+    local deadline=$((SECONDS + HEALTH_TIMEOUT))
+    until healthy; do
+        [ "$SECONDS" -lt "$deadline" ] || return 1
+        sleep 3
+    done
+}
+
+# The image the compose file should run is kept in .env so it survives reboots and "docker compose up".
+configured_image() {
+    [ -f "$ENV_FILE" ] || return 0      # first deployment: nothing configured yet
+    sed -n 's/^APP_IMAGE=//p' "$ENV_FILE" | tail -1
+}
+
+set_image() {
+    local temporary
+    temporary=$(mktemp "$ENV_FILE.XXXXXX")
+    { grep -v '^APP_IMAGE=' "$ENV_FILE" 2>/dev/null || true; echo "APP_IMAGE=$1"; } > "$temporary"
+    chmod 644 "$temporary"
+    mv "$temporary" "$ENV_FILE"
+}
+
+previous=$(configured_image)
+previous=${previous:-$(docker inspect --format '{{.Config.Image}}' "$(container)")}
+previous_id=$(running_image_id)
+
+if ! docker pull -q "$image" >/dev/null; then
+    log "could not pull $image; nothing was changed"
+    exit 1
+fi
+new_id=$(docker image inspect --format '{{.Id}}' "$image")
+
+if [ "$new_id" = "$previous_id" ] && healthy; then
+    set_image "$image"
+    log "$tag is already running and healthy"
+    exit 0
+fi
+
+log "deploying $tag (replacing $previous)"
+# Keep the outgoing build addressable even if its tag moves (e.g. ":main").
+docker tag "$previous_id" "$REPOSITORY:rollback"
+set_image "$image"
+docker compose up -d "$SERVICE" >/dev/null 2>&1 || true
+
+if wait_healthy && [ "$(running_image_id)" = "$new_id" ]; then
+    echo "$previous" > "$STATE_DIR/previous"
+    log "deployed $tag: container healthy, site answering"
+    exit 0
+fi
+
+log "$tag did not become healthy within ${HEALTH_TIMEOUT}s; last container output:"
+docker compose logs --no-log-prefix --tail 15 "$SERVICE" 2>&1 | sed 's/^/    /' || true
+log "rolling back"
+if [ "$(docker image inspect --format '{{.Id}}' "$previous" 2>/dev/null)" = "$previous_id" ]; then
+    set_image "$previous"
+else
+    set_image "$REPOSITORY:rollback"
+fi
+docker compose up -d "$SERVICE" >/dev/null 2>&1 || true
+if wait_healthy; then
+    log "rollback successful, the previous build is serving again"
+else
+    log "ROLLBACK DID NOT RESTORE SERVICE - manual attention needed"
+fi
+exit 1

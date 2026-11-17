@@ -7,10 +7,19 @@ services:
     environment:
       UPDATE_STORAGE_DIR: /data/storage
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/').read()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api').read()"]
       interval: 2s
       timeout: 2s
       retries: 20
+    # Same sandboxing as docker-compose.prod.yml, so the smoke test proves the app runs under it.
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+      - /data/storage:uid=1001,gid=1001
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
   smoke-test:
     image: curlimages/curl:8.12.1
@@ -22,4 +31,7 @@ services:
       set -e;
       curl --fail --silent http://app:8000/api | grep -q 'update-server';
       curl --fail --silent http://app:8000/api/channels | grep -q '\"stable\"';
+      curl --fail --silent http://app:8000/ | grep -q 'Device Firmware Flasher';
+      curl --fail --silent --output /dev/null http://app:8000/static/esp-web-tools/install-button.js;
+      curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://app:8000/api/admin/releases/upload | grep -q 404;
       "

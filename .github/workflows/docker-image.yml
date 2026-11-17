@@ -1,4 +1,4 @@
-name: Build Docker image
+name: Build and deploy
 
 on:
   pull_request:
@@ -6,6 +6,8 @@ on:
     branches:
       - main
   workflow_dispatch:
+
+# Actions are pinned to commit SHAs: a moved tag must not be able to change what builds the OTA server image.
 
 jobs:
   docker:
@@ -16,14 +18,32 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # The image is only pushed if the test suite passes on the commit being built.
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip && pip install .
+
+      - name: Run unittest
+        run: python -m unittest discover -s tests -p 'test_*.py'
+
+      # Builds the image and starts it under the same sandboxing as production (read-only, no capabilities).
+      - name: Smoke test the image
+        run: |
+          docker compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from smoke-test
+          docker compose -f docker-compose.test.yml down -v --remove-orphans
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -31,17 +51,18 @@ jobs:
 
       - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/update-server
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=sha
+            type=sha,format=long
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: Dockerfile
@@ -49,3 +70,38 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+  # Starts exactly the image built above on the OTA host. The SSH key used here can run one thing on the
+  # server: /usr/local/sbin/ota-deploy sha-<commit>, which health-checks the new build and rolls back on
+  # failure (see deploy/README.md). Its exit code is the result of this job.
+  deploy:
+    name: Deploy to production
+    needs: docker
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://ota.gaggimate.eu
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions: {}
+
+    steps:
+      - name: Deploy this commit
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -p "$DEPLOY_PORT" "deploy@$DEPLOY_HOST" "sha-${GITHUB_SHA}"
+
+      - name: Check the public site
+        run: curl --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors https://ota.gaggimate.eu/api
