@@ -293,12 +293,12 @@ class UpdateServerTests(ServerTestCase):
         text = self.client.get("/").text
         self.assertEqual(text.count("<esp-web-install-button"), 1)
         self.assertIn('manifest="/api/channels/stable/releases/v1.0.0/controller/manifest"', text)
-        self.assertEqual(text.count("Not part of this version"), 2)  # display (no parts) and headless (missing)
+        self.assertEqual(text.count("Not in this version"), 2)  # display (no parts) and headless (missing)
 
     def test_root_without_releases_and_channel_switch(self) -> None:
         response = self.client.get("/", params={"channel": "nightly"})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertIn("No firmware has been published to the nightly channel yet.", response.text)
+        self.assertIn("No nightly firmware yet.", response.text)
         self.assertNotIn("<esp-web-install-button", response.text)
         self.assertEqual(self.client.get("/", params={"channel": "bogus"}).status_code, 200)
 
@@ -764,14 +764,15 @@ class SignedUploadTests(ServerTestCase):
             self.assertEqual(body, content)
 
     def _page_signature_labels(self) -> dict[str, str]:
-        """Signature label per installable hardware card, as rendered on the flasher page."""
+        """Per installable hardware card on the flasher page: does it carry the signed lock?"""
         labels = {}
         for card in re.findall(r"<article.*?</article>", self.client.get("/").text, re.S):
             if "esp-web-install-button" not in card:
                 continue
-            signed = 'title="Signed with the GaggiMate release key' in card
-            unsigned = ">Not signed<" in card
-            self.assertNotEqual(signed, unsigned, "a card must show exactly one signature label")
+            signed = 'aria-label="Signed"' in card
+            # Unsigned builds show nothing: no lock, and no wording about signatures at all.
+            self.assertEqual(signed, "<svg" in card)
+            self.assertEqual(signed, "sign" in card.lower())
             labels[re.search(r"<h3[^>]*>([^<]+)</h3>", card).group(1)] = "signed" if signed else "not signed"
         return labels
 
