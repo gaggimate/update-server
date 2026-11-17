@@ -115,6 +115,17 @@
                   <p class="text-base-content/55 flex flex-wrap items-center gap-2 text-xs">
                     <span class="badge badge-ghost badge-sm font-mono">{{ target.version }}</span>
                     <span>{{ target.size }}</span>
+                    {% if target.signed_by %}
+                      <span class="text-base-content/80 inline-flex items-center gap-1 font-medium"
+                            title="Signed with the GaggiMate release key (key {{ target.signed_by }}). The signature covers every file of this build.">
+                        <svg class="text-primary size-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                          <path fill-rule="evenodd" clip-rule="evenodd" d="M10 1a4.5 4.5 0 0 0-4.5 4.5V9H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-.5V5.5A4.5 4.5 0 0 0 10 1Zm3 8V5.5a3 3 0 1 0-6 0V9h6Z" />
+                        </svg>
+                        Signed
+                      </span>
+                    {% else %}
+                      <span title="This build was published without a release signature.">Not signed</span>
+                    {% endif %}
                   </p>
                   <esp-web-install-button manifest="{{ target.manifest_url }}">
                     <button slot="activate" class="btn btn-primary btn-block">Install</button>
