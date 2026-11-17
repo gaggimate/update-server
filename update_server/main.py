@@ -18,6 +18,7 @@ from update_server.config import (
 )
 from update_server.middleware import AdminGuardMiddleware, SecurityHeadersMiddleware
 from update_server.routers.updates import router as updates_router
+from update_server.signing import stored_signature_key_id
 from update_server.storage import channel_releases
 
 PACKAGE_DIR = Path(__file__).parent
@@ -64,6 +65,8 @@ def _target_card(channel: str, version: str | None, release: dict[str, Any] | No
         "available": bool(data.get("parts")),
         "version": data.get("componentVersion") or version,
         "size": _format_size(sum(int(artifact.get("size") or 0) for artifact in data.get("artifacts", []))),
+        # Key id if this build carries a release signature that verifies right now, else None.
+        "signed_by": stored_signature_key_id(channel, version, target, data) if version else None,
         "manifest_url": f"/api/channels/{channel}/releases/{version}/{target}/manifest",
     }
 

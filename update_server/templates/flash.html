@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="light dark" />
   <title>GaggiMate Firmware Flasher</title>
-  <meta name="description" content="Install GaggiMate firmware on your board from the browser, over USB." />
+  <meta name="description" content="Flash GaggiMate firmware from your browser over USB." />
   <link rel="icon" type="image/svg+xml" href="/static/gm.svg" />
   {# Stylesheet and scripts are served from this origin only; see static/README.md. #}
   <link rel="stylesheet" href="/static/flash.css" />
@@ -29,17 +29,14 @@
     <div class="flex flex-col gap-2">
       <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">Firmware Flasher</h1>
       <p class="text-base-content/70 max-w-2xl">
-        Install GaggiMate firmware on your board straight from this page. All you need is a USB cable.
+        Flash GaggiMate firmware over USB from your browser.
       </p>
     </div>
 
     <div class="alert alert-warning" role="alert" data-show-without-serial hidden>
       <div>
-        <p class="font-semibold">This browser can't flash firmware</p>
-        <p class="text-sm">
-          Flashing needs Web Serial, which is available in Chrome and Edge on a desktop computer.
-          Open this page there to continue.
-        </p>
+        <p class="font-semibold">Browser not supported</p>
+        <p class="text-sm">Flashing needs Web Serial. Use Chrome or Edge on a desktop computer.</p>
       </div>
     </div>
 
@@ -115,14 +112,23 @@
                   <p class="text-base-content/55 flex flex-wrap items-center gap-2 text-xs">
                     <span class="badge badge-ghost badge-sm font-mono">{{ target.version }}</span>
                     <span>{{ target.size }}</span>
+                    {% if target.signed_by %}
+                      {# Unsigned builds get no label at all; only a signature that verifies right now is shown. #}
+                      <span class="inline-flex text-green-600 dark:text-green-400" role="img" aria-label="Signed"
+                            title="Signed by GaggiMate (key {{ target.signed_by }})">
+                        <svg class="size-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                          <path fill-rule="evenodd" clip-rule="evenodd" d="M10 1a4.5 4.5 0 0 0-4.5 4.5V9H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-.5V5.5A4.5 4.5 0 0 0 10 1Zm3 8V5.5a3 3 0 1 0-6 0V9h6Z" />
+                        </svg>
+                      </span>
+                    {% endif %}
                   </p>
                   <esp-web-install-button manifest="{{ target.manifest_url }}">
                     <button slot="activate" class="btn btn-primary btn-block">Install</button>
-                    <span slot="unsupported" class="text-base-content/70 text-sm">Installing is not available in this browser.</span>
-                    <span slot="not-allowed" class="text-base-content/70 text-sm">Installing only works when this page is opened over HTTPS.</span>
+                    <span slot="unsupported" class="text-base-content/70 text-sm">Not supported in this browser.</span>
+                    <span slot="not-allowed" class="text-base-content/70 text-sm">Flashing only works over HTTPS.</span>
                   </esp-web-install-button>
                 {% else %}
-                  <button class="btn btn-block" disabled>Not part of this version</button>
+                  <button class="btn btn-block" disabled>Not in this version</button>
                 {% endif %}
               </div>
             </article>
@@ -131,7 +137,7 @@
       {% else %}
         <div class="card bg-base-100 shadow-xl">
           <div class="card-body p-5 sm:p-6">
-            <p class="text-base-content/70">No firmware has been published to the {{ selected_channel }} channel yet.</p>
+            <p class="text-base-content/70">No {{ selected_channel }} firmware yet.</p>
           </div>
         </div>
       {% endif %}
@@ -139,31 +145,31 @@
 
     <section class="card bg-base-100 shadow-xl" aria-labelledby="how-heading">
       <div class="card-body gap-4 p-5 sm:p-6">
-        <h2 id="how-heading" class="card-title text-lg sm:text-xl">How installing works</h2>
+        <h2 id="how-heading" class="card-title text-lg sm:text-xl">How to flash</h2>
         <ol class="text-base-content/80 grid gap-4 text-sm md:grid-cols-3 lg:gap-6">
           <li class="flex gap-3">
             <span class="bg-primary/10 text-primary flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold">1</span>
-            <span>Connect the board to this computer with a USB cable that can carry data, not just power.</span>
+            <span>Connect the board to your computer with a USB data cable.</span>
           </li>
           <li class="flex gap-3">
             <span class="bg-primary/10 text-primary flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold">2</span>
-            <span>Press <strong>Install</strong> for your hardware and pick the board's serial port when the browser asks.</span>
+            <span>Click <strong>Install</strong> for your hardware and select the board's serial port.</span>
           </li>
           <li class="flex gap-3">
             <span class="bg-primary/10 text-primary flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold">3</span>
-            <span>Keep the cable connected until the installer says it is done. The board then restarts on the new firmware.</span>
+            <span>Wait for the installer to finish. The board restarts with the new firmware.</span>
           </li>
         </ol>
         <p class="text-base-content/70 text-sm">
-          The board doesn't show up, or you are setting it up for the first time?
-          <a class="link link-primary" href="https://docs.gaggimate.eu/docs/flashing/">Read the flashing guide</a>.
+          Board not showing up, or first-time setup?
+          <a class="link link-primary" href="https://docs.gaggimate.eu/docs/flashing/">See the flashing guide</a>.
         </p>
       </div>
     </section>
   </main>
 
   <footer class="text-base-content/55 mx-auto max-w-5xl px-4 pb-10 text-xs sm:px-6">
-    Firmware is written over USB by your browser using ESP Web Tools. Nothing from your computer is uploaded.
+    Flashing runs in your browser with ESP Web Tools.
   </footer>
 </body>
 </html>

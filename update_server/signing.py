@@ -200,3 +200,25 @@ def verify_signed_manifest(manifest: str, signature: str) -> VerifiedManifest:
         manifest=manifest,
         signature=base64.b64encode(signature_bytes).decode("ascii"),
     )
+
+
+def stored_signature_key_id(channel: str, version: str, target: str, target_data: dict[str, Any]) -> str | None:
+    """Re-check the signature stored with a published target, for display.
+
+    Returns the signing key id only if the stored manifest still verifies against a currently trusted key,
+    names this channel/version/target and lists exactly the files recorded for it. A release whose key has
+    since been removed from the trusted keys is therefore no longer shown as signed.
+    """
+    manifest, signature = target_data.get("signedManifest"), target_data.get("signature")
+    if not manifest or not signature or not signing_key_configured():
+        return None
+    try:
+        verified = verify_signed_manifest(manifest, signature)
+    except (SignatureError, SigningUnavailableError):
+        return None
+    if (verified.channel, verified.version, verified.target) != (channel, version, target):
+        return None
+    recorded = {a.get("filename"): (a.get("sha256"), a.get("size")) for a in target_data.get("artifacts", [])}
+    if recorded != {name: (file.sha256, file.size) for name, file in verified.files.items()}:
+        return None
+    return verified.key_id
