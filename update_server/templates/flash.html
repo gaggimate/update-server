@@ -4,10 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Firmware Flasher</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Montserrat:wght@300;600&display=swap" rel="stylesheet">
   <style>
+    /* Fonts and the flasher script are served from this origin: no third-party requests (see static/README.md). */
+    @font-face { font-family: Inter; font-weight: 400; font-display: swap; src: url("/static/fonts/inter-latin-400-normal.woff2") format("woff2"); }
+    @font-face { font-family: Inter; font-weight: 500; font-display: swap; src: url("/static/fonts/inter-latin-500-normal.woff2") format("woff2"); }
+    @font-face { font-family: Inter; font-weight: 600; font-display: swap; src: url("/static/fonts/inter-latin-600-normal.woff2") format("woff2"); }
+    @font-face { font-family: Montserrat; font-weight: 300; font-display: swap; src: url("/static/fonts/montserrat-latin-300-normal.woff2") format("woff2"); }
+    @font-face { font-family: Montserrat; font-weight: 600; font-display: swap; src: url("/static/fonts/montserrat-latin-600-normal.woff2") format("woff2"); }
     body {
       margin: 0;
       padding: 2rem;
@@ -113,7 +116,7 @@
       margin: 2rem 0 0.75rem;
     }
   </style>
-  <script type="module" src="https://unpkg.com/esp-web-tools@9.4.3/dist/web/install-button.js?module"></script>
+  <script type="module" src="/static/esp-web-tools/install-button.js"></script>
 </head>
 <body>
   <main>

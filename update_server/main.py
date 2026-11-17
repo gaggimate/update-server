@@ -3,22 +3,33 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from update_server.config import ALLOWED_CHANNELS, ALLOWED_TARGETS, DEFAULT_CORS_ALLOW_ORIGIN_REGEX, TARGET_LABELS
+from update_server.middleware import AdminGuardMiddleware, SecurityHeadersMiddleware
 from update_server.routers.updates import router as updates_router
 from update_server.storage import list_release_versions
 
-app = FastAPI(title="Update Server")
+PACKAGE_DIR = Path(__file__).parent
+
+# No interactive docs / OpenAPI schema on a public OTA host.
+app = FastAPI(title="Update Server", docs_url=None, redoc_url=None, openapi_url=None)
+
+# Middleware added last runs first: security headers wrap everything, then CORS, then the admin guard.
+app.add_middleware(AdminGuardMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=DEFAULT_CORS_ALLOW_ORIGIN_REGEX,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.include_router(updates_router, prefix="/api")
+app.add_middleware(SecurityHeadersMiddleware)
 
-templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+app.include_router(updates_router, prefix="/api")
+app.mount("/static", StaticFiles(directory=str(PACKAGE_DIR / "static")), name="static")
+
+templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
 
 
 @app.get("/", response_class=HTMLResponse)

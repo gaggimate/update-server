@@ -33,6 +33,14 @@ UPDATE_STORAGE_DIR = Path(os.getenv("UPDATE_STORAGE_DIR", "storage"))
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
 ALLOW_UNAUTHENTICATED_UPLOADS = _env_bool("ALLOW_UNAUTHENTICATED_UPLOADS", default=False)
 MAX_UPLOAD_FILE_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_FILE_SIZE_BYTES", str(32 * 1024 * 1024)))
+# Cap on the whole upload request (all files plus form fields), enforced while the body is being received.
+MAX_UPLOAD_REQUEST_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_REQUEST_SIZE_BYTES", str(2 * MAX_UPLOAD_FILE_SIZE_BYTES)))
+MAX_UPLOAD_FILES = int(os.getenv("MAX_UPLOAD_FILES", "16"))
+
+# Ed25519 public key(s) that release manifests must be signed with: one or more PEM "PUBLIC KEY" blocks.
+SIGNING_PUBLIC_KEY_FILE = os.getenv("SIGNING_PUBLIC_KEY_FILE") or None
+# Development-only bypass: accept uploads without a verified signature.
+ALLOW_UNSIGNED_UPLOADS = _env_bool("ALLOW_UNSIGNED_UPLOADS", default=False)
 
 # Allow local development origins by default: *.local domains, single-label hostnames,
 # and private RFC1918 IPv4 addresses.
