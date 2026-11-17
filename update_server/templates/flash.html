@@ -3,175 +3,167 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Firmware Flasher</title>
-  <style>
-    /* Fonts and the flasher script are served from this origin: no third-party requests (see static/README.md). */
-    @font-face { font-family: Inter; font-weight: 400; font-display: swap; src: url("/static/fonts/inter-latin-400-normal.woff2") format("woff2"); }
-    @font-face { font-family: Inter; font-weight: 500; font-display: swap; src: url("/static/fonts/inter-latin-500-normal.woff2") format("woff2"); }
-    @font-face { font-family: Inter; font-weight: 600; font-display: swap; src: url("/static/fonts/inter-latin-600-normal.woff2") format("woff2"); }
-    @font-face { font-family: Montserrat; font-weight: 300; font-display: swap; src: url("/static/fonts/montserrat-latin-300-normal.woff2") format("woff2"); }
-    @font-face { font-family: Montserrat; font-weight: 600; font-display: swap; src: url("/static/fonts/montserrat-latin-600-normal.woff2") format("woff2"); }
-    body {
-      margin: 0;
-      padding: 2rem;
-      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: #f8fafc;
-      color: #0f172a;
-    }
-    main {
-      max-width: 920px;
-      margin: 0 auto;
-      background: #ffffff;
-      border: 1px solid #e2e8f0;
-      border-radius: 12px;
-      padding: 1.5rem;
-      box-shadow: 0 16px 30px -24px rgba(15, 23, 42, 0.35);
-    }
-    .brand {
-      display: flex;
-      align-items: baseline;
-      gap: 0.6rem;
-      margin-bottom: 0.35rem;
-    }
-    .logo {
-      font-family: Montserrat, Inter, sans-serif;
-      font-size: 1.3rem;
-      letter-spacing: 0.08em;
-      margin: 0;
-    }
-    .logo-gaggi {
-      font-weight: 600;
-    }
-    .logo-mate {
-      font-weight: 300;
-    }
-    h1 { margin-top: 0; }
-    .toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      align-items: center;
-      margin-bottom: 1.25rem;
-    }
-    select, button {
-      background: #ffffff;
-      color: #0f172a;
-      border: 1px solid #cbd5e1;
-      border-radius: 8px;
-      padding: 0.45rem 0.7rem;
-      font-size: 0.95rem;
-    }
-    button {
-      cursor: pointer;
-      background: #0f172a;
-      border-color: #1e293b;
-      color: #ffffff;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 1rem;
-    }
-    .versions {
-      margin: 1rem 0 1.25rem;
-      border: 1px solid #cbd5e1;
-      border-radius: 10px;
-      background: #f8fafc;
-      padding: 0.5rem 0.75rem;
-    }
-    .versions summary {
-      cursor: pointer;
-      font-weight: 600;
-    }
-    .versions ul {
-      margin: 0.65rem 0 0.25rem;
-      padding-left: 1.25rem;
-    }
-    .versions li {
-      margin: 0.25rem 0;
-    }
-    .card {
-      border: 1px solid #cbd5e1;
-      border-radius: 10px;
-      padding: 1rem;
-      background: #f8fafc;
-    }
-    .card h2 {
-      margin-top: 0;
-      font-size: 1.05rem;
-    }
-    .hint {
-      color: #64748b;
-      font-size: 0.9rem;
-      margin-top: 0;
-    }
-    code {
-      font-size: 0.75rem;
-      word-break: break-all;
-      color: #1d4ed8;
-      display: block;
-      margin: 0.65rem 0;
-    }
-    .release-title {
-      margin: 2rem 0 0.75rem;
-    }
-  </style>
+  <meta name="color-scheme" content="light dark" />
+  <title>GaggiMate Firmware Flasher</title>
+  <meta name="description" content="Install GaggiMate firmware on your board from the browser, over USB." />
+  <link rel="icon" type="image/svg+xml" href="/static/gm.svg" />
+  {# Stylesheet and scripts are served from this origin only; see static/README.md. #}
+  <link rel="stylesheet" href="/static/flash.css" />
   <script type="module" src="/static/esp-web-tools/install-button.js"></script>
+  <script type="module" src="/static/flash.js"></script>
 </head>
-<body>
-  <main>
-    <div class="brand">
-      <p class="logo" aria-label="GaggiMate logo">
-        <span class="logo-gaggi">GAGGI</span><span class="logo-mate">MATE</span>
+<body class="bg-base-300 text-base-content min-h-screen antialiased">
+  <header class="bg-base-100 border-base-content/10 border-b">
+    <div class="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      <a href="/" class="font-logo text-xl tracking-[0.08em]" aria-label="GaggiMate">
+        <span class="font-semibold">GAGGI</span><span class="font-light">MATE</span>
+      </a>
+      <nav class="flex items-center gap-1" aria-label="GaggiMate links">
+        <a class="btn btn-ghost btn-sm" href="https://docs.gaggimate.eu/">Docs</a>
+        <a class="btn btn-ghost btn-sm" href="https://github.com/jniebuhr/gaggimate">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-8 sm:px-6 lg:gap-10 lg:py-12">
+    <div class="flex flex-col gap-2">
+      <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">Firmware Flasher</h1>
+      <p class="text-base-content/70 max-w-2xl">
+        Install GaggiMate firmware on your board straight from this page. All you need is a USB cable.
       </p>
     </div>
-    <h1>Device Firmware Flasher</h1>
-    <p class="hint">Choose a release channel and flash the latest firmware for your target device.</p>
 
-    <form class="toolbar" method="get" action="/">
-      <label for="channel">Channel</label>
-      <select id="channel" name="channel">
-        {% for channel in channels %}
-          <option value="{{ channel }}" {% if channel == selected_channel %}selected{% endif %}>{{ channel }}</option>
-        {% endfor %}
-      </select>
-      <button type="submit">Load channel</button>
-      {% if latest_release %}
-        <span class="hint">Latest release: <strong>{{ latest_release }}</strong></span>
-      {% else %}
-        <span class="hint">No releases uploaded yet for this channel.</span>
-      {% endif %}
-    </form>
+    <div class="alert alert-warning" role="alert" data-show-without-serial hidden>
+      <div>
+        <p class="font-semibold">This browser can't flash firmware</p>
+        <p class="text-sm">
+          Flashing needs Web Serial, which is available in Chrome and Edge on a desktop computer.
+          Open this page there to continue.
+        </p>
+      </div>
+    </div>
 
-    <section class="grid">
-      {% for target in targets %}
-        <article class="card">
-          <h2>{{ target.label }}</h2>
-          {% if latest_release %}
-            <esp-web-install-button manifest="{{ target.manifest_url }}"></esp-web-install-button>
-          {% else %}
-            <p class="hint">No firmware available for this channel yet.</p>
+    <section class="card bg-base-100 shadow-xl" aria-labelledby="release-heading">
+      <div class="card-body gap-5 p-5 sm:p-6">
+        <div>
+          <p class="text-base-content/55 text-xs font-semibold tracking-wide uppercase">Step 1</p>
+          <h2 id="release-heading" class="card-title text-lg sm:text-xl">Choose a release</h2>
+        </div>
+
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div class="flex flex-col gap-2">
+            <span class="text-sm font-medium">Channel</span>
+            <div role="tablist" class="tabs tabs-box w-fit">
+              {% for channel in channels %}
+                <a role="tab" href="/?channel={{ channel.name }}"
+                   class="tab capitalize {% if channel.selected %}tab-active{% else %}text-base-content/70{% endif %}"
+                   {% if channel.selected %}aria-selected="true" aria-current="page"{% else %}aria-selected="false"{% endif %}>{{ channel.name }}</a>
+              {% endfor %}
+            </div>
+          </div>
+
+          {% if versions %}
+            <form method="get" action="/" class="flex flex-col gap-2 sm:items-end">
+              <input type="hidden" name="channel" value="{{ selected_channel }}" />
+              <label for="version" class="text-sm font-medium">Version</label>
+              <div class="flex items-center gap-2">
+                <select id="version" name="version" class="select w-full sm:w-72" data-autosubmit>
+                  {% for version in versions %}
+                    <option value="{{ version }}" {% if version == selected_version %}selected{% endif %}>{{ version }}{% if version == latest_version %} (latest){% endif %}</option>
+                  {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-outline" data-hide-with-js>Show</button>
+              </div>
+            </form>
           {% endif %}
-        </article>
-      {% endfor %}
+        </div>
+
+        {% for channel in channels %}
+          {% if channel.selected %}
+            <div class="flex flex-col gap-2">
+              {% if selected_version %}
+                <p class="flex flex-wrap items-center gap-2 text-sm">
+                  {% if selected_version == latest_version %}
+                    <span class="badge badge-soft badge-primary badge-sm">Latest</span>
+                  {% else %}
+                    <span class="badge badge-warning badge-sm">Older version</span>
+                  {% endif %}
+                  {% if release_date %}<span class="text-base-content/70">Published {{ release_date }}</span>{% endif %}
+                </p>
+              {% endif %}
+              <p class="text-base-content/70 text-sm">{{ channel.description }}</p>
+            </div>
+          {% endif %}
+        {% endfor %}
+      </div>
     </section>
 
-    {% if previous_release_targets %}
-      <h2 class="release-title">Previous versions</h2>
-      {% for release in previous_release_targets %}
-        <details class="versions">
-          <summary>{{ release.version }}</summary>
-          <section class="grid">
-            {% for target in release.targets %}
-              <article class="card">
-                <h2>{{ target.label }}</h2>
-                <esp-web-install-button manifest="{{ target.manifest_url }}"></esp-web-install-button>
-              </article>
-            {% endfor %}
-          </section>
-        </details>
-      {% endfor %}
-    {% endif %}
+    <section class="flex flex-col gap-4" aria-labelledby="hardware-heading">
+      <div>
+        <p class="text-base-content/55 text-xs font-semibold tracking-wide uppercase">Step 2</p>
+        <h2 id="hardware-heading" class="text-lg font-semibold sm:text-xl">Install on your hardware</h2>
+      </div>
+
+      {% if selected_version %}
+        <div class="grid gap-4 md:grid-cols-3 lg:gap-6">
+          {% for target in targets %}
+            <article class="card bg-base-100 shadow-xl">
+              <div class="card-body gap-3 p-5 sm:p-6">
+                <h3 class="card-title text-base sm:text-lg">{{ target.label }}</h3>
+                <p class="text-base-content/70 grow text-sm">{{ target.description }}</p>
+                {% if target.available %}
+                  <p class="text-base-content/55 flex flex-wrap items-center gap-2 text-xs">
+                    <span class="badge badge-ghost badge-sm font-mono">{{ target.version }}</span>
+                    <span>{{ target.size }}</span>
+                  </p>
+                  <esp-web-install-button manifest="{{ target.manifest_url }}">
+                    <button slot="activate" class="btn btn-primary btn-block">Install</button>
+                    <span slot="unsupported" class="text-base-content/70 text-sm">Installing is not available in this browser.</span>
+                    <span slot="not-allowed" class="text-base-content/70 text-sm">Installing only works when this page is opened over HTTPS.</span>
+                  </esp-web-install-button>
+                {% else %}
+                  <button class="btn btn-block" disabled>Not part of this version</button>
+                {% endif %}
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="card bg-base-100 shadow-xl">
+          <div class="card-body p-5 sm:p-6">
+            <p class="text-base-content/70">No firmware has been published to the {{ selected_channel }} channel yet.</p>
+          </div>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="card bg-base-100 shadow-xl" aria-labelledby="how-heading">
+      <div class="card-body gap-4 p-5 sm:p-6">
+        <h2 id="how-heading" class="card-title text-lg sm:text-xl">How installing works</h2>
+        <ol class="text-base-content/80 grid gap-4 text-sm md:grid-cols-3 lg:gap-6">
+          <li class="flex gap-3">
+            <span class="bg-primary/10 text-primary flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold">1</span>
+            <span>Connect the board to this computer with a USB cable that can carry data, not just power.</span>
+          </li>
+          <li class="flex gap-3">
+            <span class="bg-primary/10 text-primary flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold">2</span>
+            <span>Press <strong>Install</strong> for your hardware and pick the board's serial port when the browser asks.</span>
+          </li>
+          <li class="flex gap-3">
+            <span class="bg-primary/10 text-primary flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold">3</span>
+            <span>Keep the cable connected until the installer says it is done. The board then restarts on the new firmware.</span>
+          </li>
+        </ol>
+        <p class="text-base-content/70 text-sm">
+          The board doesn't show up, or you are setting it up for the first time?
+          <a class="link link-primary" href="https://docs.gaggimate.eu/docs/flashing/">Read the flashing guide</a>.
+        </p>
+      </div>
+    </section>
   </main>
+
+  <footer class="text-base-content/55 mx-auto max-w-5xl px-4 pb-10 text-xs sm:px-6">
+    Firmware is written over USB by your browser using ESP Web Tools. Nothing from your computer is uploaded.
+  </footer>
 </body>
 </html>

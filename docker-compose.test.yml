@@ -31,7 +31,8 @@ services:
       set -e;
       curl --fail --silent http://app:8000/api | grep -q 'update-server';
       curl --fail --silent http://app:8000/api/channels | grep -q '\"stable\"';
-      curl --fail --silent http://app:8000/ | grep -q 'Device Firmware Flasher';
+      curl --fail --silent http://app:8000/ | grep -q 'Firmware Flasher';
       curl --fail --silent --output /dev/null http://app:8000/static/esp-web-tools/install-button.js;
+      curl --fail --silent --output /dev/null http://app:8000/static/flash.css;
       curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://app:8000/api/admin/releases/upload | grep -q 404;
       "

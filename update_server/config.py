@@ -12,6 +12,17 @@ TARGET_LABELS = {
     "headless": "GaggiMate Headless",
 }
 
+# Shown on the flasher page.
+TARGET_DESCRIPTIONS = {
+    "display": "The touchscreen unit. Runs the user interface, profiles and the web interface.",
+    "controller": "The controller board inside the machine. Reads the sensors and drives heater, pump and valves.",
+    "headless": "Display firmware for builds without a screen. Everything is controlled from the web interface.",
+}
+CHANNEL_DESCRIPTIONS = {
+    "stable": "Official releases. Recommended for most machines.",
+    "nightly": "Built automatically from the latest development state, so new features and fixes arrive here first.",
+}
+
 DEFAULT_CHIP_FAMILY = "ESP32-S3"
 DEFAULT_PART_OFFSETS = {
     "bootloader.bin": 0,
