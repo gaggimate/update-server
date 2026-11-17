@@ -1,0 +1,14 @@
+{
+  "name": "update-server-frontend",
+  "private": true,
+  "description": "Build tooling for the flasher page stylesheet. The generated CSS is committed; the Python app and the Docker image do not need Node.",
+  "scripts": {
+    "build:css": "tailwindcss -i frontend/flash.css -o update_server/static/flash.css --minify",
+    "watch:css": "tailwindcss -i frontend/flash.css -o update_server/static/flash.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.5",
+    "daisyui": "5.8.1",
+    "tailwindcss": "4.3.5"
+  }
+}

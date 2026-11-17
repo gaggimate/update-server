@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -55,10 +56,12 @@ class ServerTestCase(unittest.TestCase):
             setattr(module, name, value)
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def _upload(self, version: str = "1.0.0", target: str = "controller", files=None, headers=None, client=None, **fields):
+    def _upload(
+        self, version: str = "1.0.0", target: str = "controller", files=None, headers=None, client=None, channel_override="stable", **fields
+    ):
         return (client or self.client).post(
             UPLOAD_URL,
-            data={"channel": "stable", "version": version, "target": target, **fields},
+            data={"channel": channel_override, "version": version, "target": target, **fields},
             files=files or [("files", ("firmware.bin", b"firm", "application/octet-stream"))],
             headers=headers or {},
         )
@@ -237,7 +240,7 @@ class UpdateServerTests(ServerTestCase):
         self.assertEqual(behind_tag.status_code, 200, behind_tag.text)
         self.assertTrue(behind_tag.json()["updates"]["controller"]["updateAvailable"])
 
-    def test_root_serves_previous_versions_collapsed(self) -> None:
+    def test_root_offers_every_version_and_installs_the_latest_by_default(self) -> None:
         for version in ["v1.2.0", "v1.1.0", "v1.0.0"]:
             response = self.client.post(
                 "/api/admin/releases/upload",
@@ -248,24 +251,50 @@ class UpdateServerTests(ServerTestCase):
 
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertIn("Latest release: <strong>v1.2.0</strong>", response.text)
-        self.assertIn("<details class=\"versions\">", response.text)
-        self.assertIn("<summary>v1.1.0</summary>", response.text)
-        self.assertIn("<summary>v1.0.0</summary>", response.text)
-        self.assertIn(
-            "manifest=\"/api/channels/stable/releases/v1.1.0/controller/manifest\"",
-            response.text,
-        )
-        self.assertIn(
-            "manifest=\"/api/channels/stable/releases/v1.0.0/controller/manifest\"",
-            response.text,
-        )
+        self.assertIn('<option value="v1.2.0" selected>v1.2.0 (latest)</option>', response.text)
+        self.assertIn('<option value="v1.1.0" >v1.1.0</option>', response.text)
+        self.assertIn('<option value="v1.0.0" >v1.0.0</option>', response.text)
+        self.assertIn('manifest="/api/channels/stable/releases/v1.2.0/controller/manifest"', response.text)
+        self.assertNotIn("releases/v1.1.0/", response.text)
+
+    def test_root_shows_the_requested_version(self) -> None:
+        for version in ["v1.2.0", "v1.1.0"]:
+            self.assertEqual(self._upload(version=version, files=self._standard_files()).status_code, 200)
+
+        response = self.client.get("/", params={"channel": "stable", "version": "v1.1.0"})
+        self.assertIn('<option value="v1.1.0" selected>v1.1.0</option>', response.text)
+        self.assertIn('manifest="/api/channels/stable/releases/v1.1.0/controller/manifest"', response.text)
+        self.assertIn("Older version", response.text)
+
+        # Anything that is not a published version falls back to the latest and is never echoed.
+        for bogus in ["v9.9.9", "../../etc/passwd", '"><script>alert(1)</script>']:
+            response = self.client.get("/", params={"channel": "stable", "version": bogus})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn('manifest="/api/channels/stable/releases/v1.2.0/controller/manifest"', response.text)
+            self.assertNotIn(bogus, response.text)
+
+    def test_root_only_offers_targets_that_can_be_flashed(self) -> None:
+        self.assertEqual(self._upload(version="v1.0.0", target="controller", files=self._standard_files()).status_code, 200)
+        # A target without known flash parts cannot be installed from the browser.
+        self.assertEqual(self._upload(version="v1.0.0", target="display", files=[("files", ("notes.bin", b"x", "application/octet-stream"))]).status_code, 200)
+
+        text = self.client.get("/").text
+        self.assertEqual(text.count("<esp-web-install-button"), 1)
+        self.assertIn('manifest="/api/channels/stable/releases/v1.0.0/controller/manifest"', text)
+        self.assertEqual(text.count("Not part of this version"), 2)  # display (no parts) and headless (missing)
+
+    def test_root_without_releases_and_channel_switch(self) -> None:
+        response = self.client.get("/", params={"channel": "nightly"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("No firmware has been published to the nightly channel yet.", response.text)
+        self.assertNotIn("<esp-web-install-button", response.text)
+        self.assertEqual(self.client.get("/", params={"channel": "bogus"}).status_code, 200)
 
     def test_root_serves_html_flasher_page(self) -> None:
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn("text/html", response.headers["content-type"])
-        self.assertIn("Device Firmware Flasher", response.text)
+        self.assertIn("Firmware Flasher", response.text)
 
     def test_cors_allows_local_domain_origin(self) -> None:
         response = self.client.options(
@@ -550,16 +579,50 @@ class FlasherPageTests(ServerTestCase):
         self._upload()
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200, response.text)
-        for marker in ("http://", "https://", 'src="//'):
-            self.assertNotIn(marker, response.text)
-        self.assertIn('src="/static/esp-web-tools/install-button.js"', response.text)
+        # Links to other sites are fine; anything the browser would load must come from this origin.
+        loaded = re.findall(r'<(?:script|img|iframe|source)\b[^>]*\bsrc="([^"]+)"', response.text)
+        loaded += re.findall(r'<link\b[^>]*\bhref="([^"]+)"', response.text)
+        self.assertIn("/static/esp-web-tools/install-button.js", loaded)
+        self.assertIn("/static/flash.css", loaded)
+        for url in loaded:
+            self.assertTrue(url.startswith("/static/"), url)
+        self.assertNotIn("<style", response.text)
+        self.assertNotIn("@import", response.text)
+
+        stylesheet = self.client.get("/static/flash.css").text
+        for url in re.findall(r"url\(([^)]+)\)", stylesheet):
+            url = url.strip("\"'")
+            self.assertTrue(url.startswith(("/static/", "data:")), url[:60])
+        self.assertNotIn("@import", stylesheet)
 
     def test_static_assets_are_served(self) -> None:
         script = self.client.get("/static/esp-web-tools/install-button.js")
         self.assertEqual(script.status_code, 200)
         self.assertIn("javascript", script.headers["content-type"])
-        self.assertEqual(self.client.get("/static/fonts/inter-latin-400-normal.woff2").status_code, 200)
+        for path in ("/static/flash.css", "/static/flash.js", "/static/gm.svg", "/static/fonts/montserrat-latin-600-normal.woff2"):
+            self.assertEqual(self.client.get(path).status_code, 200, path)
         self.assertEqual(self.client.get("/static/../config.py").status_code, 404)
+
+    def test_stylesheet_covers_every_class_the_page_uses(self) -> None:
+        # flash.css is generated by Tailwind from the template (npm run build:css) and committed. A class
+        # that is used on the page but missing from the stylesheet means the build was not rerun.
+        for version, target, files in [("v1.1.0", "controller", None), ("v1.0.0", "controller", None)]:
+            self._upload(version=version, target=target, files=files)
+        pages = [
+            self.client.get("/").text,
+            self.client.get("/", params={"version": "v1.0.0"}).text,
+            self.client.get("/", params={"channel": "nightly"}).text,
+        ]
+        self._upload(version="v1.0.0-1-gabc1234", target="display", channel_override="nightly")
+        pages.append(self.client.get("/", params={"channel": "nightly"}).text)
+
+        stylesheet = (REPO_ROOT / "update_server" / "static" / "flash.css").read_text()
+        classes = {name for page in pages for attribute in re.findall(r'class="([^"]*)"', page) for name in attribute.split()}
+        self.assertGreater(len(classes), 40)
+        missing = sorted(
+            name for name in classes if "." + re.sub(r"([^A-Za-z0-9_-])", r"\\\1", name) not in stylesheet
+        )
+        self.assertEqual(missing, [], "run `npm run build:css` and commit update_server/static/flash.css")
 
     def test_security_headers_are_set(self) -> None:
         for path in ("/", "/api", "/api/does-not-exist"):
