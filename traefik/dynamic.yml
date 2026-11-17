@@ -1,0 +1,53 @@
+# Traefik routing for the OTA host (mounted by docker-compose.prod.yml).
+#
+# Routes are defined here instead of in container labels so that Traefik does not need the Docker socket
+# (anything that can talk to that socket is root on the host). Traefik reloads this file when it changes.
+#
+# The public hostname is proxied by Cloudflare, so the client address Traefik sees is a Cloudflare address.
+# Do not add per-IP rate limits here without first restoring the real client IP.
+
+http:
+  routers:
+    ota:
+      rule: "Host(`ota.gaggimate.eu`)"
+      entryPoints: [websecure]
+      service: ota
+      middlewares: [ota-headers]
+      tls:
+        certResolver: le
+
+    # Upload endpoint: bounded request size and bounded concurrency, enforced before the app sees a byte.
+    ota-admin:
+      rule: "Host(`ota.gaggimate.eu`) && PathPrefix(`/api/admin`)"
+      entryPoints: [websecure]
+      service: ota
+      middlewares: [ota-headers, ota-admin-concurrency, ota-upload-limit]
+      tls:
+        certResolver: le
+
+  services:
+    ota:
+      loadBalancer:
+        servers:
+          - url: "http://app:8000"
+
+  middlewares:
+    ota-headers:
+      headers:
+        stsSeconds: 31536000
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: "no-referrer"
+
+    # Matches the app's MAX_UPLOAD_REQUEST_SIZE_BYTES default. Anything larger is refused with 413.
+    ota-upload-limit:
+      buffering:
+        maxRequestBodyBytes: 67108864
+        memRequestBodyBytes: 1048576
+
+    # At most 8 uploads in flight in total (grouped by Host, not by client IP: see note above).
+    ota-admin-concurrency:
+      inFlightReq:
+        amount: 8
+        sourceCriterion:
+          requestHost: true

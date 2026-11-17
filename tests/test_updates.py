@@ -1,29 +1,70 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import shutil
+import subprocess
+import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 
 import update_server.config as app_config
 import update_server.security as app_security
+import update_server.signing as app_signing
 import update_server.storage as app_storage
 from update_server.main import app
 
+UPLOAD_URL = "/api/admin/releases/upload"
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
-class UpdateServerTests(unittest.TestCase):
+
+class ServerTestCase(unittest.TestCase):
+    """Fresh storage per test; uploads open (no API key, no signature) unless a test tightens them."""
+
     def setUp(self) -> None:
         self.temp_dir = Path(tempfile.mkdtemp(prefix="update-server-tests-"))
+        self._saved = {
+            (module, name): getattr(module, name)
+            for module, name in [
+                (app_config, "UPDATE_STORAGE_DIR"),
+                (app_config, "MAX_UPLOAD_REQUEST_SIZE_BYTES"),
+                (app_storage, "UPDATE_STORAGE_DIR"),
+                (app_security, "ADMIN_API_KEY"),
+                (app_security, "ALLOW_UNAUTHENTICATED_UPLOADS"),
+                (app_signing, "SIGNING_PUBLIC_KEY_FILE"),
+                (app_signing, "ALLOW_UNSIGNED_UPLOADS"),
+            ]
+        }
         app_config.UPDATE_STORAGE_DIR = self.temp_dir
         app_storage.UPDATE_STORAGE_DIR = self.temp_dir
         app_security.ADMIN_API_KEY = None
         app_security.ALLOW_UNAUTHENTICATED_UPLOADS = True
+        app_signing.SIGNING_PUBLIC_KEY_FILE = None
+        app_signing.ALLOW_UNSIGNED_UPLOADS = True
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
+        for (module, name), value in self._saved.items():
+            setattr(module, name, value)
         shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _upload(self, version: str = "1.0.0", target: str = "controller", files=None, headers=None, client=None, **fields):
+        return (client or self.client).post(
+            UPLOAD_URL,
+            data={"channel": "stable", "version": version, "target": target, **fields},
+            files=files or [("files", ("firmware.bin", b"firm", "application/octet-stream"))],
+            headers=headers or {},
+        )
+
+
+class UpdateServerTests(ServerTestCase):
 
     def _standard_files(self) -> list[tuple[str, tuple[str, bytes, str]]]:
         return [
@@ -164,29 +205,6 @@ class UpdateServerTests(unittest.TestCase):
         self.assertIsNone(readme_file["offset"])
         self.assertEqual(readme_file["path"], "/api/channels/stable/releases/3.0.0/controller/readme.txt")
 
-    def test_upload_accepts_signed_sha256_and_exposes_it(self) -> None:
-        signed_hashes = """-----BEGIN PGP SIGNED MESSAGE-----
-Hash: SHA256
-
-"""
-        signed_hashes += "3f62550731d942f8bb6b5deb60037847212ca7092c2f2d0d932bce230a0caf26  firmware.bin\n"
-        signed_hashes += "-----BEGIN PGP SIGNATURE-----\nabc\n-----END PGP SIGNATURE-----\n"
-
-        response = self.client.post(
-            "/api/admin/releases/upload",
-            data={
-                "channel": "stable",
-                "version": "4.0.0",
-                "target": "controller",
-                "signed_sha256": signed_hashes,
-            },
-            files=[("files", ("firmware.bin", b"firm", "application/octet-stream"))],
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-
-        details = self.client.get("/api/channels/stable/releases/4.0.0").json()
-        self.assertIn("PGP SIGNATURE", details["targets"]["controller"]["signedSha256"])
-
     def test_release_listing_uses_semver_order_for_stable_and_git_describe_versions(self) -> None:
         for version in ["v1.7.3", "v1.7.3-16-g011559ea", "v1.8.0", "v1.7.10"]:
             response = self.client.post(
@@ -292,6 +310,578 @@ Hash: SHA256
         )
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIsNone(response.headers.get("access-control-allow-origin"))
+
+    def test_cors_does_not_cover_unknown_public_origin_on_get(self) -> None:
+        response = self.client.get("/api/channels", headers={"Origin": "https://example.com"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(response.headers.get("access-control-allow-origin"))
+
+
+class UploadHardeningTests(ServerTestCase):
+    def test_unauthenticated_request_is_rejected_before_body_is_parsed(self) -> None:
+        app_security.ADMIN_API_KEY = "secret"
+
+        import starlette.formparsers as formparsers
+
+        consumed = {"bytes": 0}
+        original = formparsers.MultiPartParser.on_part_data
+
+        def spy(parser, data, start, end):
+            consumed["bytes"] += end - start
+            return original(parser, data, start, end)
+
+        formparsers.MultiPartParser.on_part_data = spy
+        try:
+            response = self._upload(files=[("files", ("firmware.bin", b"\0" * (2 * 1024 * 1024), "application/octet-stream"))])
+        finally:
+            formparsers.MultiPartParser.on_part_data = original
+
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(consumed["bytes"], 0)
+
+    def test_admin_endpoint_looks_like_404_without_valid_key(self) -> None:
+        app_security.ADMIN_API_KEY = "secret"
+
+        invalid_fields = self.client.post(
+            UPLOAD_URL,
+            data={"channel": "nope", "version": "../x", "target": "nope"},
+            files=[("files", ("firmware.bin", b"x", "application/octet-stream"))],
+        )
+        no_body = self.client.post(UPLOAD_URL, headers={"x-api-key": "wrong"})
+        non_ascii_key = self._upload(headers={"x-api-key": b"caf\xe9"})
+        unknown_admin_path = self.client.get("/api/admin/anything")
+
+        for response in (invalid_fields, no_body, non_ascii_key, unknown_admin_path):
+            self.assertEqual(response.status_code, 404, response.text)
+            self.assertEqual(response.json(), {"detail": "Not found"})
+
+    def test_valid_api_key_can_upload(self) -> None:
+        app_security.ADMIN_API_KEY = "secret"
+        response = self._upload(headers={"x-api-key": "secret"})
+        self.assertEqual(response.status_code, 200, response.text)
+
+    def test_api_docs_are_not_exposed(self) -> None:
+        for path in ("/docs", "/redoc", "/openapi.json"):
+            self.assertEqual(self.client.get(path).status_code, 404, path)
+
+    def test_request_larger_than_limit_is_rejected(self) -> None:
+        app_config.MAX_UPLOAD_REQUEST_SIZE_BYTES = 64 * 1024
+        response = self._upload(files=[("files", ("firmware.bin", b"\0" * (256 * 1024), "application/octet-stream"))])
+        self.assertEqual(response.status_code, 413, response.text)
+        self.assertEqual(self.client.get("/api/channels/stable/releases").json()["versions"], [])
+
+    def test_request_without_content_length_is_still_limited(self) -> None:
+        app_config.MAX_UPLOAD_REQUEST_SIZE_BYTES = 64 * 1024
+        boundary = "testboundary"
+
+        def body():
+            yield (
+                f'--{boundary}\r\nContent-Disposition: form-data; name="channel"\r\n\r\nstable\r\n'
+                f'--{boundary}\r\nContent-Disposition: form-data; name="version"\r\n\r\n1.0.0\r\n'
+                f'--{boundary}\r\nContent-Disposition: form-data; name="target"\r\n\r\ncontroller\r\n'
+                f'--{boundary}\r\nContent-Disposition: form-data; name="files"; filename="firmware.bin"\r\n\r\n'
+            ).encode()
+            for _ in range(16):
+                yield b"\0" * (16 * 1024)
+            yield f"\r\n--{boundary}--\r\n".encode()
+
+        response = self.client.post(
+            UPLOAD_URL, content=body(), headers={"content-type": f"multipart/form-data; boundary={boundary}"}
+        )
+        self.assertEqual(response.status_code, 413, response.text)
+
+    def test_rejects_reserved_and_malformed_versions(self) -> None:
+        for version in ["latest", "LATEST", "1.0.0\n", "a..b", "-1.0.0"]:
+            response = self._upload(version=version)
+            self.assertEqual(response.status_code, 400, f"{version!r}: {response.text}")
+
+    def test_rejects_duplicate_and_malformed_filenames(self) -> None:
+        duplicate = self._upload(
+            files=[
+                ("files", ("firmware.bin", b"a", "application/octet-stream")),
+                ("files", ("firmware.bin", b"b", "application/octet-stream")),
+            ]
+        )
+        self.assertEqual(duplicate.status_code, 400, duplicate.text)
+        with self.assertRaises(Exception):
+            app_security.validate_filename("firmware.bin\n")
+
+    def test_component_version_label_and_chip_family_are_stored(self) -> None:
+        response = self._upload(
+            version="1.0.0", component_version="1.0.0-controller", label="GaggiMate Controller (Pro)", chip_family="ESP32-C6"
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        manifest = self.client.get("/api/channels/stable/releases/1.0.0/controller/manifest").json()
+        self.assertEqual(manifest["version"], "1.0.0-controller")
+        self.assertEqual(manifest["name"], "GaggiMate Controller (Pro)")
+        self.assertEqual(manifest["builds"][0]["chipFamily"], "ESP32-C6")
+
+        for bad in [{"label": "<script>"}, {"chip_family": "ESP32 S3!"}, {"component_version": "../1"}]:
+            response = self._upload(version="1.0.1", **bad)
+            self.assertEqual(response.status_code, 400, f"{bad}: {response.text}")
+
+    def test_binaries_are_served_as_downloads_only(self) -> None:
+        response = self._upload(files=[("files", ("page.html", b"<script>alert(1)</script>", "text/html"))])
+        self.assertEqual(response.status_code, 200, response.text)
+
+        response = self.client.get("/api/channels/stable/releases/1.0.0/controller/page.html")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers["content-type"], "application/octet-stream")
+        self.assertIn("attachment", response.headers["content-disposition"])
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+
+    def test_binary_supports_range_requests(self) -> None:
+        self._upload(files=[("files", ("firmware.bin", b"0123456789", "application/octet-stream"))])
+        response = self.client.get(
+            "/api/channels/stable/releases/1.0.0/controller/firmware.bin", headers={"Range": "bytes=4-"}
+        )
+        self.assertEqual(response.status_code, 206, response.text)
+        self.assertEqual(response.content, b"456789")
+
+    def test_files_not_recorded_in_release_are_not_served(self) -> None:
+        self.assertEqual(self._upload().status_code, 200)
+        target_dir = self.temp_dir / "updates" / "stable" / "1.0.0" / "controller"
+        (target_dir / "stray.bin").write_bytes(b"not part of the release")
+        orphan_dir = self.temp_dir / "updates" / "stable" / "2.0.0" / "controller"
+        orphan_dir.mkdir(parents=True)
+        (orphan_dir / "firmware.bin").write_bytes(b"no release.json")
+
+        self.assertEqual(self.client.get("/api/channels/stable/releases/1.0.0/controller/stray.bin").status_code, 404)
+        self.assertEqual(self.client.get("/api/channels/stable/releases/2.0.0/controller/firmware.bin").status_code, 404)
+        self.assertEqual(self.client.get("/api/channels/stable/releases/1.0.0/display/firmware.bin").status_code, 404)
+
+    def test_oversized_file_leaves_nothing_behind(self) -> None:
+        import update_server.routers.updates as updates_router
+
+        original = updates_router.MAX_UPLOAD_FILE_SIZE_BYTES
+        updates_router.MAX_UPLOAD_FILE_SIZE_BYTES = 8
+        try:
+            response = self._upload(
+                files=[
+                    ("files", ("bootloader.bin", b"boot", "application/octet-stream")),
+                    ("files", ("firmware.bin", b"way too large", "application/octet-stream")),
+                ]
+            )
+        finally:
+            updates_router.MAX_UPLOAD_FILE_SIZE_BYTES = original
+
+        self.assertEqual(response.status_code, 413, response.text)
+        self.assertEqual(self.client.get("/api/channels/stable/releases/1.0.0/controller/bootloader.bin").status_code, 404)
+        self.assertEqual(list((self.temp_dir / ".staging").iterdir()), [])
+        self.assertFalse((self.temp_dir / "updates" / "stable" / "1.0.0").exists())
+
+    def test_parallel_target_uploads_are_all_recorded(self) -> None:
+        targets = ["controller", "display", "headless"]
+        for round_number in range(10):
+            version = f"1.0.{round_number}"
+            statuses: dict[str, int] = {}
+
+            def upload(target: str) -> None:
+                statuses[target] = self._upload(version=version, target=target, client=TestClient(app)).status_code
+
+            threads = [threading.Thread(target=upload, args=(target,)) for target in targets]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            self.assertEqual(statuses, dict.fromkeys(targets, 200))
+            details = self.client.get(f"/api/channels/stable/releases/{version}")
+            self.assertEqual(details.status_code, 200, details.text)
+            self.assertEqual(set(details.json()["targets"]), set(targets))
+
+    def test_parallel_uploads_of_same_target_publish_exactly_one(self) -> None:
+        results: list[tuple[int, bytes]] = []
+
+        def upload(payload: bytes) -> None:
+            response = self._upload(
+                files=[("files", ("firmware.bin", payload, "application/octet-stream"))], client=TestClient(app)
+            )
+            results.append((response.status_code, payload))
+
+        threads = [threading.Thread(target=upload, args=(f"payload-{n}".encode(),)) for n in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        winners = [payload for status_code, payload in results if status_code == 200]
+        self.assertEqual(sorted(status_code for status_code, _ in results), [200] + [409] * 5)
+        served = self.client.get("/api/channels/stable/releases/1.0.0/controller/firmware.bin")
+        self.assertEqual(served.content, winners[0])
+        manifest = self.client.get("/api/channels/stable/releases/1.0.0/controller/manifest").json()
+        self.assertEqual(manifest["builds"][0]["parts"][0]["sha256"], hashlib.sha256(winners[0]).hexdigest())
+
+    def test_corrupt_release_does_not_break_the_channel(self) -> None:
+        for version in ["1.0.0", "1.1.0", "1.2.0"]:
+            self.assertEqual(self._upload(version=version).status_code, 200)
+        (self.temp_dir / "updates" / "stable" / "1.1.0" / "release.json").write_text("{broken")
+        app_storage._index_cache.clear()
+
+        check = self.client.get("/api/channels/stable/check", params={"controller_version": "1.0.0"})
+        self.assertEqual(check.status_code, 200, check.text)
+        self.assertEqual(check.json()["updates"]["controller"]["latest"], "1.2.0")
+        self.assertEqual(self.client.get("/api/channels/stable/releases").json()["versions"], ["1.2.0", "1.0.0"])
+        self.assertEqual(self.client.get("/").status_code, 200)
+        self.assertEqual(self.client.get("/api/channels/stable/releases/1.1.0").status_code, 500)
+        self.assertEqual(self._upload(version="1.1.0", target="display").status_code, 500)
+
+    def test_check_tolerates_garbage_versions(self) -> None:
+        self.assertEqual(self._upload().status_code, 200)
+        for version in ["9" * 5000, "not a version", "", "1.0.0\n"]:
+            response = self.client.get("/api/channels/stable/check", params={"controller_version": version})
+            self.assertEqual(response.status_code, 200, f"{version[:20]!r}: {response.text[:200]}")
+
+    def test_new_release_is_visible_immediately_despite_index_cache(self) -> None:
+        self.assertEqual(self._upload(version="1.0.0").status_code, 200)
+        self.assertEqual(self.client.get("/api/channels/stable/releases").json()["versions"], ["1.0.0"])
+        self.assertEqual(self._upload(version="1.1.0").status_code, 200)
+        self.assertEqual(self._upload(version="1.1.0", target="display").status_code, 200)
+
+        check = self.client.get(
+            "/api/channels/stable/check", params={"controller_version": "1.0.0", "display_version": "1.0.0"}
+        ).json()["updates"]
+        self.assertEqual(check["controller"]["latest"], "1.1.0")
+        self.assertEqual(check["display"]["latest"], "1.1.0")
+
+
+class FlasherPageTests(ServerTestCase):
+    def test_page_loads_nothing_from_third_parties(self) -> None:
+        self._upload()
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200, response.text)
+        for marker in ("http://", "https://", 'src="//'):
+            self.assertNotIn(marker, response.text)
+        self.assertIn('src="/static/esp-web-tools/install-button.js"', response.text)
+
+    def test_static_assets_are_served(self) -> None:
+        script = self.client.get("/static/esp-web-tools/install-button.js")
+        self.assertEqual(script.status_code, 200)
+        self.assertIn("javascript", script.headers["content-type"])
+        self.assertEqual(self.client.get("/static/fonts/inter-latin-400-normal.woff2").status_code, 200)
+        self.assertEqual(self.client.get("/static/../config.py").status_code, 404)
+
+    def test_security_headers_are_set(self) -> None:
+        for path in ("/", "/api", "/api/does-not-exist"):
+            headers = self.client.get(path).headers
+            self.assertEqual(headers["x-content-type-options"], "nosniff", path)
+            self.assertEqual(headers["x-frame-options"], "DENY", path)
+            self.assertIn("max-age=", headers["strict-transport-security"], path)
+            csp = headers["content-security-policy"]
+            self.assertIn("script-src 'self'", csp)
+            self.assertIn("frame-ancestors 'none'", csp)
+            self.assertNotIn("unsafe-eval", csp)
+
+
+def public_pem(key: Ed25519PrivateKey) -> bytes:
+    return key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+
+
+def build_manifest(files: dict[str, bytes], channel="stable", version="1.0.0", target="controller", **extra) -> str:
+    document = {
+        "schema": 1,
+        "channel": channel,
+        "version": version,
+        "target": target,
+        "files": [
+            {"name": name, "size": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+            for name, content in files.items()
+        ],
+        **extra,
+    }
+    return json.dumps(document, sort_keys=True, separators=(",", ":"))
+
+
+def sign(key: Ed25519PrivateKey, manifest: str) -> str:
+    return base64.b64encode(key.sign(manifest.encode())).decode()
+
+
+class SignatureRequirementTests(ServerTestCase):
+    def test_unsigned_upload_is_refused_by_default_configuration(self) -> None:
+        app_signing.ALLOW_UNSIGNED_UPLOADS = False
+        app_signing.SIGNING_PUBLIC_KEY_FILE = None
+
+        unsigned = self._upload()
+        self.assertEqual(unsigned.status_code, 400, unsigned.text)
+        signed = self._upload(manifest="{}", signature="AAAA")
+        self.assertEqual(signed.status_code, 503, signed.text)
+        self.assertEqual(self.client.get("/api/channels/stable/releases").json()["versions"], [])
+
+    def test_signature_is_never_stored_unverified(self) -> None:
+        app_signing.ALLOW_UNSIGNED_UPLOADS = True
+        app_signing.SIGNING_PUBLIC_KEY_FILE = None
+        manifest = build_manifest({"firmware.bin": b"firm"})
+        response = self._upload(manifest=manifest, signature=sign(Ed25519PrivateKey.generate(), manifest))
+        self.assertEqual(response.status_code, 400, response.text)
+
+    def test_unusable_key_file_disables_uploads_but_not_downloads(self) -> None:
+        self.assertEqual(self._upload(version="1.0.0").status_code, 200)
+        app_signing.ALLOW_UNSIGNED_UPLOADS = False
+        key_file = self.temp_dir / "key.pem"
+        app_signing.SIGNING_PUBLIC_KEY_FILE = str(key_file)
+        manifest = build_manifest({"firmware.bin": b"firm"}, version="1.1.0")
+        signature = sign(Ed25519PrivateKey.generate(), manifest)
+
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        wrong_algorithm = ec.generate_private_key(ec.SECP256R1()).public_key().public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        for content in (None, b"", b"not a key", b"-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n", wrong_algorithm):
+            if content is None:
+                key_file.unlink(missing_ok=True)
+            else:
+                key_file.write_bytes(content)
+            for payload in ({"manifest": manifest, "signature": signature}, {"manifest": "garbage", "signature": "garbage"}):
+                response = self._upload(version="1.1.0", **payload)
+                self.assertEqual(response.status_code, 503, f"{content!r}: {response.text}")
+
+        self.assertEqual(self.client.get("/api/channels/stable/releases/1.0.0/controller/firmware.bin").status_code, 200)
+
+
+class SignedUploadTests(ServerTestCase):
+    FILES = {"bootloader.bin": b"boot", "firmware.bin": b"firm"}
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.key = Ed25519PrivateKey.generate()
+        cls.other_key = Ed25519PrivateKey.generate()
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.key_file = self.temp_dir / "release-signing-key.pub.pem"
+        self.key_file.write_bytes(public_pem(self.key))
+        app_signing.SIGNING_PUBLIC_KEY_FILE = str(self.key_file)
+        app_signing.ALLOW_UNSIGNED_UPLOADS = False
+
+    def _files(self, files: dict[str, bytes]):
+        return [("files", (name, content, "application/octet-stream")) for name, content in files.items()]
+
+    def _signed_upload(self, files=None, manifest=None, signature=None, key=None, version="1.0.0", target="controller", **fields):
+        files = self.FILES if files is None else files
+        manifest = build_manifest(files, version=version, target=target) if manifest is None else manifest
+        signature = sign(key or self.key, manifest) if signature is None else signature
+        return self._upload(
+            version=version, target=target, files=self._files(files), manifest=manifest, signature=signature, **fields
+        )
+
+    def _assert_rejected(self, response, files=None, status_code: int = 400) -> str:
+        self.assertEqual(response.status_code, status_code, response.text)
+        # Nothing of a rejected upload may become visible.
+        self.assertEqual(self.client.get("/api/channels/stable/releases").json()["versions"], [])
+        for name in files or self.FILES:
+            self.assertEqual(self.client.get(f"/api/channels/stable/releases/1.0.0/controller/{name}").status_code, 404)
+        self.assertEqual(list((self.temp_dir / ".staging").iterdir()), [])
+        return response.json()["detail"]
+
+    def test_validly_signed_upload_is_accepted_and_served_verbatim(self) -> None:
+        manifest = build_manifest(self.FILES)
+        signature = sign(self.key, manifest)
+        response = self._signed_upload(manifest=manifest, signature=signature)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["signatureKeyId"], app_signing.key_id(self.key.public_key()))
+
+        expected = {"manifest": manifest, "signature": signature, "keyId": app_signing.key_id(self.key.public_key())}
+        served = self.client.get("/api/channels/stable/releases/1.0.0/controller/manifest").json()["signed"]
+        self.assertEqual(served, expected)
+        self.assertEqual(self.client.get("/api/channels/stable/releases/latest/controller/manifest").json()["signed"], expected)
+        details = self.client.get("/api/channels/stable/releases/1.0.0").json()["targets"]["controller"]
+        self.assertEqual(details["signed"], expected)
+
+        # What a device does: verify the served bytes with the built-in key, then trust only their content.
+        self.key.public_key().verify(base64.b64decode(served["signature"]), served["manifest"].encode())
+        signed_files = {entry["name"]: entry for entry in json.loads(served["manifest"])["files"]}
+        for name, content in self.FILES.items():
+            body = self.client.get(f"/api/channels/stable/releases/1.0.0/controller/{name}").content
+            self.assertEqual(hashlib.sha256(body).hexdigest(), signed_files[name]["sha256"])
+            self.assertEqual(body, content)
+
+    def test_unsigned_release_has_no_signed_block(self) -> None:
+        app_signing.ALLOW_UNSIGNED_UPLOADS = True
+        self.assertEqual(self._upload().status_code, 200)
+        self.assertIsNone(self.client.get("/api/channels/stable/releases/1.0.0/controller/manifest").json()["signed"])
+
+    def test_any_key_in_the_key_file_is_accepted(self) -> None:
+        self.key_file.write_bytes(public_pem(self.other_key) + b"\n# old key kept during rotation\n" + public_pem(self.key))
+        first = self._signed_upload(version="1.0.0")
+        second = self._signed_upload(version="1.0.1", key=self.other_key)
+        self.assertEqual(first.json()["signatureKeyId"], app_signing.key_id(self.key.public_key()), first.text)
+        self.assertEqual(second.json()["signatureKeyId"], app_signing.key_id(self.other_key.public_key()), second.text)
+
+    def test_signed_component_version_is_used(self) -> None:
+        manifest = build_manifest(self.FILES, componentVersion="1.0.0-c2")
+        response = self._signed_upload(manifest=manifest)
+        self.assertEqual(response.status_code, 200, response.text)
+        check = self.client.get("/api/channels/stable/check", params={"controller_version": "0.9.0"}).json()
+        self.assertEqual(check["updates"]["controller"]["latest"], "1.0.0-c2")
+
+        conflicting = self._signed_upload(version="1.0.1", manifest=build_manifest(self.FILES, version="1.0.1"), component_version="9.9.9")
+        self.assertEqual(conflicting.status_code, 400, conflicting.text)
+        bad = self._signed_upload(version="1.0.2", manifest=build_manifest(self.FILES, version="1.0.2", componentVersion="../x"))
+        self.assertEqual(bad.status_code, 400, bad.text)
+
+    def test_missing_or_partial_signature_is_rejected(self) -> None:
+        manifest = build_manifest(self.FILES)
+        self.assertIn("required", self._assert_rejected(self._upload(files=self._files(self.FILES))))
+        self._assert_rejected(self._upload(files=self._files(self.FILES), manifest=manifest))
+        self._assert_rejected(self._upload(files=self._files(self.FILES), signature=sign(self.key, manifest)))
+
+    def test_signature_from_untrusted_key_is_rejected(self) -> None:
+        self.assertIn("not validly signed", self._assert_rejected(self._signed_upload(key=self.other_key)))
+
+    def test_malformed_signatures_are_rejected(self) -> None:
+        good = sign(self.key, build_manifest(self.FILES))
+        flipped = base64.b64encode(bytes([base64.b64decode(good)[0] ^ 1]) + base64.b64decode(good)[1:]).decode()
+        for signature in ("not base64!", base64.b64encode(b"short").decode(), base64.b64encode(bytes(64)).decode(), flipped, good + good):
+            self._assert_rejected(self._signed_upload(signature=signature))
+
+    def test_any_change_to_the_signed_bytes_is_rejected(self) -> None:
+        manifest = build_manifest(self.FILES)
+        signature = sign(self.key, manifest)
+        evil = {"bootloader.bin": b"boot", "firmware.bin": b"EVIL"}
+        tampered = manifest.replace(hashlib.sha256(b"firm").hexdigest(), hashlib.sha256(b"EVIL").hexdigest())
+        for changed in (tampered, manifest + "\n", " " + manifest, manifest.replace('"stable"', '"nightly"')):
+            detail = self._assert_rejected(self._signed_upload(files=evil, manifest=changed, signature=signature), evil)
+            self.assertIn("not validly signed", detail)
+
+    def test_file_that_differs_from_signed_manifest_is_rejected(self) -> None:
+        evil = {"bootloader.bin": b"boot", "firmware.bin": b"EVIL"}
+        detail = self._assert_rejected(self._signed_upload(files=evil, manifest=build_manifest(self.FILES)), evil)
+        self.assertIn("firmware.bin does not match", detail)
+
+        same_hash_wrong_size = json.loads(build_manifest(self.FILES))
+        same_hash_wrong_size["files"][1]["size"] += 1
+        detail = self._assert_rejected(self._signed_upload(manifest=json.dumps(same_hash_wrong_size)))
+        self.assertIn("firmware.bin does not match", detail)
+
+    def test_uploaded_file_not_covered_by_manifest_is_rejected(self) -> None:
+        files = {"firmware.bin": b"firm", "bootloader.bin": b"unsigned"}
+        detail = self._assert_rejected(self._signed_upload(files=files, manifest=build_manifest({"firmware.bin": b"firm"})), files)
+        self.assertIn("does not cover uploaded file(s): bootloader.bin", detail)
+
+    def test_signed_file_missing_from_upload_is_rejected(self) -> None:
+        files = {"firmware.bin": b"firm"}
+        detail = self._assert_rejected(self._signed_upload(files=files, manifest=build_manifest(self.FILES)), files)
+        self.assertIn("references missing upload(s): bootloader.bin", detail)
+
+    def test_signed_build_cannot_be_published_under_another_identity(self) -> None:
+        # A correctly signed manifest for one channel/version/target must not be accepted for another:
+        # this is what stops replaying an old release as a new one, or controller firmware as display firmware.
+        manifest = build_manifest(self.FILES, channel="stable", version="1.0.0", target="controller")
+        signature = sign(self.key, manifest)
+        for override in ({"version": "9.9.9"}, {"target": "display"}, {"channel": "nightly"}):
+            fields = {"channel": "stable", "version": "1.0.0", "target": "controller", **override}
+            response = self.client.post(
+                UPLOAD_URL, data={**fields, "manifest": manifest, "signature": signature}, files=self._files(self.FILES)
+            )
+            self.assertEqual(response.status_code, 400, response.text)
+            self.assertIn(f"Signed manifest is for {next(iter(override))}", response.json()["detail"])
+        for channel in ("stable", "nightly"):
+            self.assertEqual(self.client.get(f"/api/channels/{channel}/releases").json()["versions"], [])
+
+    def test_manifest_must_be_well_formed(self) -> None:
+        good = json.loads(build_manifest(self.FILES))
+
+        def variant(**changes):
+            return json.dumps({key: value for key, value in {**good, **changes}.items() if value is not ...})
+
+        entry = good["files"][0]
+        candidates = [
+            "not json",
+            "[]",
+            variant(schema=2),
+            variant(schema=True),
+            variant(schema=...),
+            variant(version=...),
+            variant(target=7),
+            variant(files=[]),
+            variant(files="firmware.bin"),
+            variant(files=[{**entry, "name": "../firmware.bin"}, good["files"][1]]),
+            variant(files=[{**entry, "sha256": entry["sha256"].upper()}, good["files"][1]]),
+            variant(files=[{**entry, "size": "4"}, good["files"][1]]),
+            variant(files=[{**entry, "size": -1}, good["files"][1]]),
+            variant(files=good["files"] + [good["files"][0]]),
+            build_manifest(self.FILES)[:-1] + ',"version":"1.0.0"}',  # duplicate key
+            variant(componentVersion=""),
+        ]
+        for manifest in candidates:
+            self._assert_rejected(self._signed_upload(manifest=manifest))
+        self._assert_rejected(self._signed_upload(manifest=variant(note="x" * 70000)))
+
+    def test_unknown_signed_fields_are_allowed(self) -> None:
+        response = self._signed_upload(manifest=build_manifest(self.FILES, created="2026-11-11T00:00:00Z", notes={"a": 1}))
+        self.assertEqual(response.status_code, 200, response.text)
+
+
+class SigningToolTests(ServerTestCase):
+    """scripts/sign_release.py is what release pipelines use; its output must be exactly what the server accepts."""
+
+    def _run(self, *args: str) -> str:
+        result = subprocess.run(
+            [sys.executable, str(REPO_ROOT / "scripts" / "sign_release.py"), *args], capture_output=True, text=True, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_keygen_sign_and_upload_round_trip(self) -> None:
+        work = self.temp_dir / "release"
+        work.mkdir()
+        private_key, public_key = work / "key.pem", work / "key.pub.pem"
+        output = self._run("keygen", "--private-key", str(private_key), "--public-key", str(public_key))
+        self.assertEqual(private_key.stat().st_mode & 0o777, 0o600)
+        self.assertIn("RELEASE_SIGNING_KEY[32]", output)
+        self.assertIn(output.splitlines()[2], self._run("info", "--public-key", str(public_key)))
+
+        files = {"firmware.bin": b"firm" * 1000, "bootloader.bin": b"boot"}
+        for name, content in files.items():
+            (work / name).write_bytes(content)
+        manifest_path, signature_path = work / "manifest.json", work / "manifest.sig"
+        self._run(
+            "sign", "--private-key", str(private_key), "--channel", "stable", "--version", "1.0.0", "--target", "controller",
+            "--manifest-out", str(manifest_path), "--signature-out", str(signature_path),
+            *(str(work / name) for name in files),
+        )  # fmt: skip
+
+        app_signing.SIGNING_PUBLIC_KEY_FILE = str(public_key)
+        app_signing.ALLOW_UNSIGNED_UPLOADS = False
+        response = self._upload(
+            files=[("files", (name, content, "application/octet-stream")) for name, content in files.items()],
+            manifest=manifest_path.read_text(),
+            signature=signature_path.read_text(),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn(response.json()["signatureKeyId"], output)
+
+    def test_sign_reads_the_key_from_the_environment(self) -> None:
+        key = Ed25519PrivateKey.generate()
+        pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+        firmware = self.temp_dir / "firmware.bin"
+        firmware.write_bytes(b"firm")
+        manifest_path, signature_path = self.temp_dir / "manifest.json", self.temp_dir / "manifest.sig"
+        command = [
+            sys.executable, str(REPO_ROOT / "scripts" / "sign_release.py"), "sign", "--private-key-env", "TEST_SIGNING_KEY",
+            "--channel", "nightly", "--version", "v1.0.0-3-gabc1234", "--target", "display",
+            "--manifest-out", str(manifest_path), "--signature-out", str(signature_path), str(firmware),
+        ]  # fmt: skip
+        result = subprocess.run(command, capture_output=True, text=True, check=False, env={"TEST_SIGNING_KEY": pem.decode()})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        key.public_key().verify(base64.b64decode(signature_path.read_text()), manifest_path.read_bytes())
+        self.assertEqual(json.loads(manifest_path.read_text())["channel"], "nightly")
+
+        for env in ({}, {"TEST_SIGNING_KEY": "  "}, {"TEST_SIGNING_KEY": "not a key"}):
+            result = subprocess.run(command, capture_output=True, text=True, check=False, env=env)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("Traceback", result.stderr)
+
+    def test_keygen_refuses_to_overwrite_keys(self) -> None:
+        private_key, public_key = self.temp_dir / "key.pem", self.temp_dir / "key.pub.pem"
+        private_key.write_text("existing")
+        result = subprocess.run(
+            [sys.executable, str(REPO_ROOT / "scripts" / "sign_release.py"), "keygen", "--private-key", str(private_key), "--public-key", str(public_key)],
+            capture_output=True, text=True, check=False,
+        )  # fmt: skip
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(private_key.read_text(), "existing")
 
 
 if __name__ == "__main__":
