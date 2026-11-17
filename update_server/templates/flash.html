@@ -95,13 +95,6 @@
             </div>
           {% endif %}
         {% endfor %}
-
-        {% if selected_channel == "nightly" and versions %}
-          <div class="alert alert-warning text-sm" role="note">
-            Nightly builds are not tested on real machines before they are published. Use the stable channel
-            unless you want to try a specific change.
-          </div>
-        {% endif %}
       </div>
     </section>
 

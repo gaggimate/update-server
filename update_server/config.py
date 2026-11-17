@@ -19,8 +19,8 @@ TARGET_DESCRIPTIONS = {
     "headless": "Display firmware for builds without a screen. Everything is controlled from the web interface.",
 }
 CHANNEL_DESCRIPTIONS = {
-    "stable": "Tested releases. The right choice for most machines.",
-    "nightly": "Automatic builds of the latest development state. They can contain unfinished changes.",
+    "stable": "Official releases. Recommended for most machines.",
+    "nightly": "Built automatically from the latest development state, so new features and fixes arrive here first.",
 }
 
 DEFAULT_CHIP_FAMILY = "ESP32-S3"
